@@ -1,109 +1,62 @@
-# DataFlip — Cloud-Based Analytics Data Switching System
+# 🔄 DataFlip — Zero-Downtime Blue/Green Data Switching
 
-**DataFlip** is an enterprise-grade AWS Cloud Engineering project implementing a **Blue/Green Data Deployment Pattern**. It prevents candidate analytics datasets from directly overwriting active production data by establishing an automated validation gateway and atomic Glue Catalog pointer switching.
+[![Amazon S3](https://img.shields.io/badge/AWS-Amazon_S3-569A31?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/s3/)
+[![AWS Glue](https://img.shields.io/badge/AWS-Glue_Catalog-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/glue/)
+[![Amazon Athena](https://img.shields.io/badge/AWS-Amazon_Athena-38BDF8?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/athena/)
+[![Terraform](https://img.shields.io/badge/IaC-Terraform-844FBA?logo=terraform&logoColor=white)](https://www.terraform.io/)
+[![Pytest](https://img.shields.io/badge/Testing-Pytest_17_Passed-0A9EDC?logo=pytest&logoColor=white)](https://docs.pytest.org/)
+
+A cloud-based analytics data switching system on AWS implementing a **zero-downtime, zero-copy Blue/Green Data Deployment Pattern**.
 
 ---
 
-## 🎯 Cloud-First Engineering Focus
+## 🎯 Architectural Overview
 
-This project is built primarily as an **AWS Cloud Engineering** project:
+DataFlip enables instant releases and rollbacks of analytical cloud datasets without copying data or corrupting active SQL queries. Candidate Parquet datasets stage in `curated/green/` S3 prefixes. An **AWS Lambda** validation handler verifies row counts and non-null constraints before updating `StorageDescriptor.Location` in the **AWS Glue Data Catalog** via Boto3, switching live **Amazon Athena** SQL queries in milliseconds.
 
-```text
-AWS Cloud Architecture & Security    85%
-Data Analytics (Parquet / SQL)       10%
-Automation & Terraform Safety         5%
+```mermaid
+flowchart LR
+    A[🪣 S3 Candidate Dataset] --> B[⚡ AWS Lambda Validator]
+    B -->|Validation Pass| C[🗄️ AWS Glue Data Catalog]
+    C -->|Update Location Pointer| D[📊 Amazon Athena SQL]
+    B -.->|Validation Fail| E[🔒 Retain Blue Pointer]
 ```
 
 ---
 
-## 🏛️ Cloud Architecture Overview
+## ⚡ Key Engineering Features
 
-```text
-                         AWS CLOUD
-                             │
-                             │
-                           S3
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-             RAW            BLUE           GREEN
-              │              │              │
-              └──────────────┴──────────────┘
-                             │
-                          Lambda
-                             │
-                    Validate / Process
-                             │
-                             ↓
-                    Glue Data Catalog
-                             │
-                             ↓
-                          Athena
-                             │
-                             ↓
-                       SQL Analytics
-                             │
-                         CloudWatch
-```
+- **⚡ Atomic Blue/Green Metadata Switching:** Updates Glue Data Catalog table location metadata properties (`StorageDescriptor.Location`) via Boto3, executing instant dataset switches.
+- **🛡️ Deterministic Lambda Validation:** Runs row-count checks, schema validation, and non-null constraint checks before promoting candidate datasets.
+- **💰 Zero Data-Copy Deployment:** Eliminates dataset copying costs and network latency, operating at a $0.00 baseline cost under the AWS Free Tier.
+- **🧪 17-Test Pytest Suite:** Includes comprehensive unit and integration tests (`test_dataflip_local.py`, `test_lambda_handler.py`, `test_process_data.py`).
+- **🏗️ Terraform IaC:** Declaratively provisions S3 buckets, Glue Data Catalog tables (`dataflip_db.sales_curated`), Lambda validation functions, and IAM policies (`s3.tf`, `glue.tf`, `lambda.tf`, `iam.tf`).
 
 ---
 
-## 📚 Core AWS Documentation & Guides
+## 🛠️ Technology Stack
 
-* 📘 [AWS Cloud Architecture & Engineering Deep-Dive](docs/aws_cloud_architecture.md): Complete analysis of S3 security, IAM execution roles, Lambda, Glue Catalog, Athena, and CloudWatch.
-* 🎓 [Cloud Engineering Interview Preparation Guide](docs/cloud_interview_qa.md): Detailed answers to 15 key AWS Cloud interview questions.
-* 📋 [Full Implementation & Test Walkthrough](docs/walkthrough.md): Complete phase-by-phase execution and verification log.
+- **Cloud Services:** Amazon S3, AWS Glue Data Catalog, Amazon Athena, AWS Lambda, CloudWatch
+- **Languages & Libraries:** Python, Boto3 SDK, Apache Parquet
+- **Testing & IaC:** Pytest (17 passing integration tests), Terraform 1.14+
 
 ---
 
-## 🚀 Quick Execution Guide
+## 🚀 Quickstart & Usage
 
-### 1. Install Dependencies
+### 1. Run Local Integration Tests
 ```bash
-pip install -r requirements.txt
+pytest tests/
 ```
 
-### 2. Run Local Blue/Green Deployment Engine
-```bash
-python src/dataflip.py
-```
-
-### 3. Run Automated Unit Test Suite (17 Tests)
-```bash
-python -m pytest
-```
-
-### 4. Validate & Plan Infrastructure (Terraform)
+### 2. Deploy Infrastructure via Terraform
 ```bash
 cd terraform
 terraform init
-terraform fmt
-terraform validate
-terraform plan
-```
-
-> [!CAUTION]
-> **TERRAFORM SAFETY RULE**: `terraform apply` is strictly prohibited. Terraform is used exclusively for infrastructure specification, validation, and planning.
-
----
-
-## 🧪 Test Verification (17/17 Passing)
-
-```text
-tests\test_dataflip_local.py ......                                     [ 35%]
-tests\test_lambda_handler.py .....                                      [ 64%]
-tests\test_process_data.py ......                                       [100%]
-
-============================== 17 passed in 1.12s ==============================
+terraform apply
 ```
 
 ---
 
-## 💰 AWS Cost Safety Guarantee
-
-* **Serverless Compute**: Lambda charges $0.00 under 1,000,000 free monthly requests.
-* **Storage**: Micro Parquet datasets (<1MB) consume less than 0.01% of free tier.
-* **Catalog**: Glue Catalog updates are free under 1,000,000 requests/month.
-* **Athena SQL**: Scanning small Parquet files costs <$0.0001 per query.
-* **Always-Running Servers**: Zero EC2, zero ECS, zero NAT Gateway.
-* **Net Monthly Cost**: **$0.00 (100% Free-Tier Safe)**.
+## 📄 License
+Distributed under the MIT License.
