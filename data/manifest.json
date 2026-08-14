@@ -1,0 +1,6 @@
+{
+  "active_dataset": "blue",
+  "status": "failed_candidate",
+  "details": "GREEN rejected. Keeping blue. Reason: Validation Failed: quantity must be strictly > 0",
+  "active_path": "D:\\cloud_projects\\dataflip\\data\\blue\\sales.parquet"
+}
