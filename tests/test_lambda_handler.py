@@ -9,6 +9,7 @@ from botocore.exceptions import ClientError
 
 handler_module = importlib.import_module("lambda.handler")
 parse_s3_key = handler_module.parse_s3_key
+sanitize_dataset_name = handler_module.sanitize_dataset_name
 pyarrow_to_glue_type = handler_module.pyarrow_to_glue_type
 extract_glue_columns = handler_module.extract_glue_columns
 inspect_and_validate_parquet = handler_module.inspect_and_validate_parquet
@@ -19,13 +20,22 @@ lambda_handler = handler_module.lambda_handler
 
 
 # =====================================================================
-# 1. Unit Tests: S3 Key Parsing
+# 1. Unit Tests: S3 Key Parsing & Dataset Sanitization
 # =====================================================================
+
+def test_sanitize_dataset_name():
+    assert sanitize_dataset_name("user-telemetry") == "user_telemetry"
+    assert sanitize_dataset_name("My-Dataset_01") == "my_dataset_01"
+    assert sanitize_dataset_name("---") == "default_dataset"
 
 def test_parse_s3_key_valid_patterns():
     # Direct dataset path
     res1 = parse_s3_key("telemetry/green/metrics.parquet")
     assert res1 == {'dataset_name': 'telemetry', 'slot': 'green', 'filename': 'metrics.parquet'}
+
+    # Hyphenated path gets sanitized for Glue
+    res_hyphen = parse_s3_key("user-analytics/green/events.parquet")
+    assert res_hyphen == {'dataset_name': 'user_analytics', 'slot': 'green', 'filename': 'events.parquet'}
 
     # Prefixed staging path
     res2 = parse_s3_key("curated/customer_profiles/green/users.parquet")

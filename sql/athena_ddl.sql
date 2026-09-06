@@ -41,6 +41,6 @@ TBLPROPERTIES (
 -- Root Location Switch:
 --   - DataFlip updates the Glue table definition (schema & storage location)
 --     in milliseconds via `glue.update_table(TableInput=...)`.
---   - Replaces slow, expensive physical object copying with atomic pointer updates.
+--   - Replaces slow, expensive physical object copying with metadata pointer updates.
 --   - Downstream Athena queries instantly resolve the active dataset partition.
 -- =====================================================================

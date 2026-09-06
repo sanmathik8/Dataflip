@@ -21,6 +21,14 @@ READ_ONLY_GLUE_KEYS = {
     'IsMultiDialectView', 'IsMaterializedView'
 }
 
+def sanitize_dataset_name(raw_name: str) -> str:
+    """
+    Sanitize dataset name to comply with AWS Glue Data Catalog table naming rules
+    (lowercase alphanumeric and underscores only).
+    """
+    cleaned = re.sub(r'[^a-zA-Z0-9_]', '_', raw_name).strip('_').lower()
+    return cleaned or "default_dataset"
+
 def parse_s3_key(key: str) -> dict | None:
     """
     Parse an S3 object key to extract dataset_name, slot ('green' or 'blue'), and filename.
@@ -33,7 +41,7 @@ def parse_s3_key(key: str) -> dict | None:
     if not match:
         return None
     return {
-        'dataset_name': match.group('dataset'),
+        'dataset_name': sanitize_dataset_name(match.group('dataset')),
         'slot': match.group('slot'),
         'filename': match.group('filename')
     }
@@ -230,12 +238,13 @@ def lambda_handler(event, context):
 
     # 1. Handle Rollback Action
     if isinstance(event, dict) and event.get('action') == 'rollback':
-        dataset_name = event.get('dataset_name') or event.get('dataset')
-        if not dataset_name:
+        raw_dataset = event.get('dataset_name') or event.get('dataset')
+        if not raw_dataset:
             return {
                 'statusCode': 400,
                 'body': json.dumps({'status': 'ERROR', 'message': 'dataset_name is required for rollback action'})
             }
+        dataset_name = sanitize_dataset_name(raw_dataset)
         
         blue_location = f"s3://{S3_BUCKET}/{dataset_name}/blue/"
         try:
@@ -301,7 +310,8 @@ def lambda_handler(event, context):
 
     # Check for direct record payload (testing / programmatic API)
     elif isinstance(event, dict) and ("records" in event or "schema" in event):
-        dataset_name = event.get("dataset_name") or event.get("dataset", "default_dataset")
+        raw_dataset = event.get("dataset_name") or event.get("dataset", "default_dataset")
+        dataset_name = sanitize_dataset_name(raw_dataset)
         source_info = f"payload:{dataset_name}"
         if "schema" in event:
             glue_columns = event["schema"]

@@ -45,16 +45,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "analytics" {
   bucket = aws_s3_bucket.analytics.id
 
   rule {
-    id     = "expire_old_reports_and_candidates"
+    id     = "clean_old_noncurrent_versions"
     status = "Enabled"
 
-    filter {
-      prefix = "reports/"
-    }
-
-    expiration {
-      days = 90
-    }
+    filter {}
 
     noncurrent_version_expiration {
       noncurrent_days = 30
@@ -88,12 +82,7 @@ resource "aws_s3_bucket_policy" "enforce_tls" {
   })
 }
 
-# S3 Key Prefixes
-resource "aws_s3_object" "raw_prefix" {
-  bucket = aws_s3_bucket.analytics.id
-  key    = "raw/"
-}
-
+# S3 Key Prefixes for Default Namespaces
 resource "aws_s3_object" "curated_blue_prefix" {
   bucket = aws_s3_bucket.analytics.id
   key    = "curated/blue/"
@@ -102,11 +91,6 @@ resource "aws_s3_object" "curated_blue_prefix" {
 resource "aws_s3_object" "curated_green_prefix" {
   bucket = aws_s3_bucket.analytics.id
   key    = "curated/green/"
-}
-
-resource "aws_s3_object" "reports_prefix" {
-  bucket = aws_s3_bucket.analytics.id
-  key    = "reports/"
 }
 
 

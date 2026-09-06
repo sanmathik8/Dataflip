@@ -21,3 +21,10 @@ variable "environment" {
   }
 }
 
+variable "lambda_layer_arns" {
+  type        = list(string)
+  default     = []
+  description = "Optional list of Lambda Layer ARNs (e.g. AWS SDK for pandas/PyArrow and AWS Lambda Powertools)"
+}
+
+

@@ -46,7 +46,10 @@ resource "aws_iam_policy" "lambda_policy" {
         Sid      = "CloudWatchLogs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "arn:aws:logs:*:*:log-group:/aws/lambda/${var.project_name}-processor:*"
+        Resource = [
+          "arn:aws:logs:*:*:log-group:/aws/lambda/${var.project_name}-processor",
+          "arn:aws:logs:*:*:log-group:/aws/lambda/${var.project_name}-processor:*"
+        ]
       }
     ]
   })
