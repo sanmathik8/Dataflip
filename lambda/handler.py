@@ -1,175 +1,146 @@
 import os
 import json
-import logging
+import time
 import boto3
+import pandas as pd
+from botocore.exceptions import ClientError
+from aws_lambda_powertools import Logger
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = Logger(service="dataflip")
 
-# Environment variables
-S3_BUCKET = os.environ.get('S3_BUCKET', 'dataflip-analytics-bucket')
+S3_BUCKET = os.environ.get('S3_BUCKET', 'dataflip-analytics-dev')
 GLUE_DATABASE = os.environ.get('GLUE_DATABASE', 'dataflip_db')
 GLUE_TABLE = os.environ.get('GLUE_TABLE', 'sales_curated')
 
-REQUIRED_COLUMNS = [
-    'order_id', 'order_date', 'product', 'category',
-    'quantity', 'unit_price', 'region', 'revenue'
-]
+READ_ONLY_GLUE_KEYS = {
+    'DatabaseName', 'CreateTime', 'UpdateTime', 'CreatedBy',
+    'IsRegisteredWithLakeFormation', 'CatalogId', 'VersionId', 'Owner',
+    'IsMultiDialectView', 'IsMaterializedView'
+}
 
 def validate_records(records: list[dict]) -> tuple[bool, str]:
-    """Validate data records in memory."""
-    if not records or len(records) == 0:
+    """Validate data records generically in memory using Pandas."""
+    if not records:
         return False, "Validation Failed: Empty record set (0 rows)"
 
-    # Check required columns on first record
-    sample = records[0]
-    missing = [col for col in REQUIRED_COLUMNS if col not in sample]
-    if missing:
-        return False, f"Validation Failed: Missing required columns {missing}"
-
-    for idx, row in enumerate(records):
-        if row.get('order_id') is None:
-            return False, f"Validation Failed: Null order_id at row index {idx}"
-        
-        try:
-            qty = float(row.get('quantity', 0))
-            if qty <= 0:
-                return False, f"Validation Failed: Invalid quantity ({qty}) at row index {idx}"
-        except (ValueError, TypeError):
-            return False, f"Validation Failed: Non-numeric quantity at row index {idx}"
-
-        try:
-            price = float(row.get('unit_price', -1))
-            if price < 0:
-                return False, f"Validation Failed: Invalid unit_price ({price}) at row index {idx}"
-        except (ValueError, TypeError):
-            return False, f"Validation Failed: Non-numeric unit_price at row index {idx}"
-
-        try:
-            rev = float(row.get('revenue', -1))
-            if rev < 0:
-                return False, f"Validation Failed: Invalid revenue ({rev}) at row index {idx}"
-        except (ValueError, TypeError):
-            return False, f"Validation Failed: Non-numeric revenue at row index {idx}"
+    try:
+        df = pd.DataFrame(records)
+        if df.empty:
+            return False, "Validation Failed: Empty record set (0 rows)"
+        if len(df.columns) == 0:
+            return False, "Validation Failed: Dataset has no columns"
+    except Exception as e:
+        return False, f"Validation Failed: {e}"
 
     return True, f"Validation Passed: {len(records)} records validated successfully"
 
-def update_glue_table_location(glue_client, database: str, table_name: str, new_s3_location: str):
-    """Update Glue Catalog Table S3 Location to switch active dataset."""
-    response = glue_client.get_table(DatabaseName=database, Name=table_name)
-    table_input = response['Table']
-    
-    # Strip read-only fields returned by get_table
-    read_only_keys = ['DatabaseName', 'CreateTime', 'UpdateTime', 'CreatedBy',
-                      'IsRegisteredWithLakeFormation', 'CatalogId', 'VersionId', 'Owner']
-    for key in read_only_keys:
-        table_input.pop(key, None)
-        
-    table_input['StorageDescriptor']['Location'] = new_s3_location
-    
-    glue_client.update_table(
-        DatabaseName=database,
-        TableInput=table_input
+def update_glue_table_location(glue_client, database: str, table_name: str, new_s3_location: str, max_retries: int = 3):
+    """Update Glue Catalog Table S3 Location with optimistic locking & backoff retries."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = glue_client.get_table(DatabaseName=database, Name=table_name)
+            table_input = {k: v for k, v in response['Table'].items() if k not in READ_ONLY_GLUE_KEYS}
+            table_input['StorageDescriptor']['Location'] = new_s3_location
+
+            glue_client.update_table(DatabaseName=database, TableInput=table_input)
+            logger.info(f"[Glue Switch Success] Attempt {attempt}/{max_retries}: Updated '{database}.{table_name}' to '{new_s3_location}'")
+            return
+        except ClientError as e:
+            code = e.response.get('Error', {}).get('Code', '')
+            if code in ['ConcurrentModificationException', 'AlreadyExistsException'] and attempt < max_retries:
+                backoff_sec = (2 ** attempt) * 0.1
+                logger.warning(f"[Glue Retry] {code} detected. Retrying in {backoff_sec:.2f}s...")
+                time.sleep(backoff_sec)
+            else:
+                logger.error(f"[Glue Error] Non-retryable error: {e}", exc_info=True)
+                raise
+        except Exception as e:
+            logger.error(f"[Glue Error] Attempt {attempt}/{max_retries} failed: {e}", exc_info=True)
+            if attempt >= max_retries:
+                raise
+
+def _write_s3_manifest(s3_client, active_dataset: str, status: str, message: str, location: str, extra: dict = None) -> None:
+    """Write deployment manifest metadata to S3."""
+    payload = {
+        'active_dataset': active_dataset,
+        'status': status,
+        'message': message,
+        's3_location': location,
+        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    }
+    if extra:
+        payload.update(extra)
+    s3_client.put_object(
+        Bucket=S3_BUCKET,
+        Key='curated/active_manifest.json',
+        Body=json.dumps(payload, indent=2)
     )
-    logger.info(f"Glue Catalog Table '{database}.{table_name}' location updated to: {new_s3_location}")
 
 def lambda_handler(event, context):
     """AWS Lambda entrypoint for DataFlip Blue/Green release & rollback."""
-    logger.info(f"DataFlip Lambda Invoked. Event: {json.dumps(event)}")
-    
-    s3_client = boto3.client('s3')
-    glue_client = boto3.client('glue')
-    
-    # 1. Handle Manual Rollback Action
+    start_time = time.time()
+    request_id = getattr(context, 'aws_request_id', 'local-test-id')
+    logger.append_keys(request_id=request_id, dataset=GLUE_TABLE)
+    logger.info(f"[Invocation Start] Event: {json.dumps(event)}")
+
+    s3_client, glue_client = boto3.client('s3'), boto3.client('glue')
+
+    # 1. Handle Rollback Action
     if isinstance(event, dict) and event.get('action') == 'rollback':
-        logger.info("Executing Rollback Action...")
         blue_location = f"s3://{S3_BUCKET}/curated/blue/"
         try:
             update_glue_table_location(glue_client, GLUE_DATABASE, GLUE_TABLE, blue_location)
-            manifest = {
-                'active_dataset': 'blue',
-                'status': 'rolled_back',
-                'message': 'Production dataset reverted to BLUE'
-            }
-            s3_client.put_object(
-                Bucket=S3_BUCKET,
-                Key='curated/active_manifest.json',
-                Body=json.dumps(manifest, indent=2)
-            )
+            _write_s3_manifest(s3_client, 'blue', 'rolled_back', 'Production dataset reverted to BLUE', blue_location)
+            duration_ms = round((time.time() - start_time) * 1000, 2)
             return {
                 'statusCode': 200,
-                'body': json.dumps({'status': 'SUCCESS', 'message': 'Rollback completed to BLUE'})
+                'body': json.dumps({
+                    'status': 'SUCCESS',
+                    'message': 'Rollback completed to BLUE',
+                    'active_location': blue_location,
+                    'execution_time_ms': duration_ms
+                })
             }
         except Exception as e:
-            logger.error(f"Rollback failed: {e}")
-            return {
-                'statusCode': 500,
-                'body': json.dumps({'status': 'ERROR', 'message': str(e)})
-            }
+            logger.error(f"[Rollback Exception] {e}", exc_info=True)
+            return {'statusCode': 500, 'body': json.dumps({'status': 'ERROR', 'message': str(e)})}
 
-    # 2. Extract Candidate Data Payload or S3 Event
-    records = event.get('records', [])
-    
-    # Validate Candidate Data
+    # 2. Candidate Data Processing
+    records = event.get('records', []) if isinstance(event, dict) else []
     is_valid, validation_msg = validate_records(records)
-    
+
     if is_valid:
-        logger.info(f"GREEN Dataset Validation Passed: {validation_msg}")
         green_location = f"s3://{S3_BUCKET}/curated/green/"
-        
-        # Activate GREEN in Glue Data Catalog
         try:
             update_glue_table_location(glue_client, GLUE_DATABASE, GLUE_TABLE, green_location)
-            
-            manifest = {
-                'active_dataset': 'green',
-                'status': 'active',
-                'message': validation_msg,
-                's3_location': green_location
-            }
-            s3_client.put_object(
-                Bucket=S3_BUCKET,
-                Key='curated/active_manifest.json',
-                Body=json.dumps(manifest, indent=2)
-            )
+            _write_s3_manifest(s3_client, 'green', 'active', validation_msg, green_location)
+            duration_ms = round((time.time() - start_time) * 1000, 2)
             return {
                 'statusCode': 200,
                 'body': json.dumps({
                     'status': 'ACTIVATED_GREEN',
                     'message': validation_msg,
-                    'active_location': green_location
+                    'active_location': green_location,
+                    'execution_time_ms': duration_ms
                 })
             }
         except Exception as e:
-            logger.error(f"Failed to update Glue Catalog: {e}")
-            return {
-                'statusCode': 500,
-                'body': json.dumps({'status': 'ERROR', 'message': str(e)})
-            }
+            logger.error(f"[Activation Error] {e}", exc_info=True)
+            return {'statusCode': 500, 'body': json.dumps({'status': 'ERROR', 'message': str(e)})}
     else:
-        logger.warning(f"GREEN Dataset Validation Failed: {validation_msg}. Retaining BLUE dataset.")
         blue_location = f"s3://{S3_BUCKET}/curated/blue/"
-        
-        manifest = {
-            'active_dataset': 'blue',
-            'status': 'retained_on_failure',
-            'rejection_reason': validation_msg,
-            's3_location': blue_location
-        }
         try:
-            s3_client.put_object(
-                Bucket=S3_BUCKET,
-                Key='curated/active_manifest.json',
-                Body=json.dumps(manifest, indent=2)
-            )
+            _write_s3_manifest(s3_client, 'blue', 'retained_on_failure', validation_msg, blue_location, {'rejection_reason': validation_msg})
         except Exception as e:
-            logger.error(f"Failed to write manifest: {e}")
+            logger.error(f"[Manifest Error] {e}", exc_info=True)
 
+        duration_ms = round((time.time() - start_time) * 1000, 2)
         return {
             'statusCode': 422,
             'body': json.dumps({
                 'status': 'REJECTED_GREEN',
                 'reason': validation_msg,
-                'active_location': blue_location
+                'active_location': blue_location,
+                'execution_time_ms': duration_ms
             })
         }
