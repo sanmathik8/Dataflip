@@ -17,7 +17,6 @@ resource "aws_lambda_function" "dataflip_processor" {
     variables = {
       S3_BUCKET     = aws_s3_bucket.analytics.id
       GLUE_DATABASE = aws_glue_catalog_database.dataflip_db.name
-      GLUE_TABLE    = aws_glue_catalog_table.sales_curated.name
     }
   }
 

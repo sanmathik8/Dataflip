@@ -1,57 +1,56 @@
--- Athena Analytics Query 1: Total Revenue across Active Dataset
-SELECT 
-    ROUND(SUM(revenue), 2) AS total_revenue,
-    COUNT(order_id) AS total_orders,
-    ROUND(AVG(revenue), 2) AS average_order_value
-FROM dataflip_db.sales_curated;
+-- =====================================================================
+-- DataFlip — Amazon Athena Analytical Query Patterns
+-- =====================================================================
+-- Queries execute against dynamically registered datasets in `dataflip_db`.
+-- Replace `<dataset_name>` with any deployed dataset (e.g. telemetry, customers).
+-- =====================================================================
 
--- Athena Analytics Query 2: Revenue by Product Category
-SELECT 
-    category,
-    ROUND(SUM(revenue), 2) AS category_revenue,
-    COUNT(order_id) AS total_orders,
-    ROUND(AVG(unit_price), 2) AS avg_unit_price
-FROM dataflip_db.sales_curated
-GROUP BY category
-ORDER BY category_revenue DESC;
-
--- Athena Analytics Query 3: Regional Sales Performance & Market Share
-SELECT 
-    region,
-    ROUND(SUM(revenue), 2) AS region_revenue,
-    COUNT(order_id) AS total_orders,
-    ROUND(SUM(revenue) * 100.0 / SUM(SUM(revenue)) OVER (), 2) AS revenue_share_pct
-FROM dataflip_db.sales_curated
-GROUP BY region
-ORDER BY region_revenue DESC;
-
--- Athena Analytics Query 4: Top Performing Products by Total Revenue & Quantity Sold
-SELECT 
-    product,
-    category,
-    SUM(quantity) AS total_quantity_sold,
-    ROUND(SUM(revenue), 2) AS product_revenue
-FROM dataflip_db.sales_curated
-GROUP BY product, category
-ORDER BY product_revenue DESC
+-- Query 1: Data Preview and Schema Inspection
+SELECT * 
+FROM dataflip_db.<dataset_name>
 LIMIT 10;
 
--- Athena Analytics Query 5: Daily Revenue & Order Volume Trends
+-- Query 2: Dataset Volume & Completeness Audit
 SELECT 
-    order_date,
-    COUNT(order_id) AS daily_orders,
-    ROUND(SUM(revenue), 2) AS daily_revenue
-FROM dataflip_db.sales_curated
-GROUP BY order_date
-ORDER BY order_date ASC;
+    COUNT(*) AS total_records
+FROM dataflip_db.<dataset_name>;
 
--- Athena Analytics Query 6: Data Quality Audit Verification Snapshot
+-- Query 3: Multi-Dataset Catalog Discovery (Query Glue Information Schema)
 SELECT 
-    COUNT(*) AS total_rows,
-    COUNT(order_id) AS non_null_orders,
-    COUNT(order_date) AS non_null_dates,
-    MIN(quantity) AS min_quantity,
-    MIN(unit_price) AS min_unit_price,
-    MIN(revenue) AS min_revenue
-FROM dataflip_db.sales_curated;
+    table_name,
+    table_type
+FROM information_schema.tables 
+WHERE table_schema = 'dataflip_db'
+ORDER BY table_name;
 
+-- Query 4: Column and Data Type Inspection
+SELECT 
+    column_name, 
+    data_type, 
+    is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'dataflip_db' 
+  AND table_name = '<dataset_name>'
+ORDER BY ordinal_position;
+
+-- Query 5: Example Analytics Pattern — Telemetry Metrics
+-- (Applicable when <dataset_name> = 'telemetry')
+-- SELECT 
+--     metric_name,
+--     COUNT(*) AS sample_count,
+--     ROUND(AVG(value), 3) AS avg_value,
+--     ROUND(MIN(value), 3) AS min_value,
+--     ROUND(MAX(value), 3) AS max_value
+-- FROM dataflip_db.telemetry
+-- GROUP BY metric_name
+-- ORDER BY sample_count DESC;
+
+-- Query 6: Example Analytics Pattern — Customer Accounts
+-- (Applicable when <dataset_name> = 'customers')
+-- SELECT 
+--     country,
+--     COUNT(customer_id) AS total_customers,
+--     SUM(account_balance) AS total_balance
+-- FROM dataflip_db.customers
+-- GROUP BY country
+-- ORDER BY total_customers DESC;

@@ -34,11 +34,11 @@ resource "aws_iam_policy" "lambda_policy" {
       {
         Sid    = "GlueAccess"
         Effect = "Allow"
-        Action = ["glue:GetTable", "glue:UpdateTable", "glue:GetDatabase"]
+        Action = ["glue:GetTable", "glue:UpdateTable", "glue:CreateTable", "glue:GetDatabase"]
         Resource = [
           "arn:aws:glue:*:*:catalog",
           aws_glue_catalog_database.dataflip_db.arn,
-          aws_glue_catalog_table.sales_curated.arn
+          "arn:aws:glue:*:*:table/${aws_glue_catalog_database.dataflip_db.name}/*"
         ]
       },
 

@@ -15,17 +15,18 @@
       ]
     },
     {
-      "Sid": "GlueCatalogUpdateAccess",
+      "Sid": "GlueCatalogDynamicAccess",
       "Effect": "Allow",
       "Action": [
         "glue:GetTable",
         "glue:UpdateTable",
+        "glue:CreateTable",
         "glue:GetDatabase"
       ],
       "Resource": [
         "arn:aws:glue:*:*:catalog",
         "arn:aws:glue:*:*:database/dataflip_db",
-        "arn:aws:glue:*:*:table/dataflip_db/sales_curated"
+        "arn:aws:glue:*:*:table/dataflip_db/*"
       ]
     },
     {

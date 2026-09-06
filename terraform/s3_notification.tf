@@ -18,7 +18,6 @@ resource "aws_s3_bucket_notification" "green_candidate_notification" {
   lambda_function {
     lambda_function_arn = aws_lambda_function.dataflip_processor.arn
     events              = ["s3:ObjectCreated:*"]
-    filter_prefix       = "curated/green/"
     filter_suffix       = ".parquet"
   }
 

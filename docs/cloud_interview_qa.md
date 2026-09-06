@@ -1,21 +1,21 @@
 # DataFlip — Cloud Engineering Interview Preparation Guide
 
-This guide provides deep technical answers for the 15 key AWS Cloud Engineering interview questions based on the DataFlip architecture.
+This guide provides technical answers for 15 key AWS Cloud Engineering interview questions based on the DataFlip architecture.
 
 ---
 
 ### Q1: Why use Amazon S3 for analytics data storage?
-**Answer**: Amazon S3 provides highly durable (99.999999999% / 11 9s), scalable, and cost-effective object storage decoupled from compute. S3 natively integrates with serverless query engines (Athena) and metadata catalogs (Glue). By organizing data into prefix conventions (`raw/`, `curated/blue/`, `curated/green/`), S3 acts as a serverless data lake foundation without managing disk partitions or database servers.
+**Answer**: Amazon S3 provides highly durable (99.999999999% / 11 9s), scalable, and cost-effective object storage decoupled from compute. S3 natively integrates with serverless query engines (Athena) and metadata catalogs (Glue). By organizing data into prefix conventions (`<dataset_name>/blue/`, `<dataset_name>/green/`), S3 acts as a serverless data lake foundation without managing disk partitions or database servers.
 
 ---
 
 ### Q2: Why separate datasets into BLUE and GREEN in S3?
-**Answer**: Separating candidate data (`GREEN`) from active production data (`BLUE`) implements the Blue/Green deployment pattern for data pipelines. It prevents corrupted, incomplete, or ill-formatted datasets from directly overwriting active production data consumed by downstream BI dashboards (Athena/QuickSight). `BLUE` remains active until `GREEN` passes all quality validation checks.
+**Answer**: Separating candidate data (`GREEN`) from active production data (`BLUE`) implements the Blue/Green deployment pattern for analytical data lakes. It prevents corrupted, incomplete, or ill-formatted datasets from directly overwriting active production data consumed by downstream BI dashboards (Athena/QuickSight). `BLUE` remains active until `GREEN` passes structural and schema validation.
 
 ---
 
 ### Q3: Why use AWS Lambda for the data validation and switching logic?
-**Answer**: AWS Lambda is an event-driven, serverless compute service. It eliminates the cost and operational overhead of running 24/7 EC2 servers for occasional batch data updates. Lambda scales automatically on-demand, executes validation checks in seconds, and updates Glue Catalog metadata cleanly via `boto3`.
+**Answer**: AWS Lambda is an event-driven, serverless compute service. It eliminates the cost and operational overhead of running 24/7 EC2 servers for occasional batch data updates. Lambda scales automatically on-demand, executes metadata-only schema discovery via PyArrow in milliseconds, and updates Glue Catalog metadata cleanly via `boto3`.
 
 ---
 
@@ -30,37 +30,37 @@ This guide provides deep technical answers for the 15 key AWS Cloud Engineering 
 ---
 
 ### Q6: Why use the AWS Glue Data Catalog instead of directly pointing Athena to S3 files?
-**Answer**: The AWS Glue Data Catalog serves as a centralized, Hive-compatible metadata repository. It decouples table definitions and schemas from physical S3 storage paths. By updating table location metadata in Glue (`glue:UpdateTable`), Athena queries immediately read the new dataset without changing SQL queries, recoding application logic, or moving physical files.
+**Answer**: The AWS Glue Data Catalog serves as a centralized, Hive-compatible metadata repository. It decouples table definitions and schemas from physical S3 storage paths. By updating table location and column metadata in Glue (`glue:UpdateTable`), Athena queries immediately read the new dataset without changing SQL queries, recoding application logic, or moving physical files.
 
 ---
 
 ### Q7: How does Amazon Athena know where to find and read the data?
-**Answer**: Athena does not store data. When a SQL query is submitted (`SELECT * FROM dataflip_db.sales_curated`), Athena queries the Glue Data Catalog for the table's `StorageDescriptor`. Glue returns the target S3 path (`s3://bucket/curated/green/`), file format (Parquet), and schema serializer/deserializer (`SerDe`). Athena then reads the Parquet objects directly from S3.
+**Answer**: Athena does not store data. When a SQL query is submitted (`SELECT * FROM dataflip_db.<dataset_name>`), Athena queries the Glue Data Catalog for the table's `StorageDescriptor`. Glue returns the target S3 path (`s3://<bucket>/<dataset_name>/green/`), file format (Parquet), and schema serializer/deserializer (`SerDe`). Athena then reads the Parquet objects directly from S3.
 
 ---
 
-### Q8: Why use Apache Parquet instead of CSV for curated analytics data?
+### Q8: Why use Apache Parquet instead of CSV for analytics data?
 **Answer**: Parquet is a columnar, compressed binary storage format optimized for analytical queries. Unlike CSV (which requires scanning every row and column), Parquet allows Athena to scan only the specific columns requested in the `SELECT` clause (projection pushdown) and filter row groups using metadata statistics (predicate pushdown). This reduces data scanned by up to 90%, speeding up queries and drastically reducing Athena costs.
 
 ---
 
 ### Q9: How does the DataFlip dataset switch actually happen under the hood?
-**Answer**: The switch is an atomic metadata operation in the AWS Glue Data Catalog. Lambda calls `boto3.client('glue').update_table()`, updating `StorageDescriptor.Location` from `s3://bucket/curated/blue/` to `s3://bucket/curated/green/`. No data files are copied or moved in S3, making the switch instantaneous and zero-cost.
+**Answer**: The switch updates the AWS Glue Data Catalog table definition. Lambda calls `boto3.client('glue').update_table()`, updating `StorageDescriptor.Location` from `s3://<bucket>/<dataset_name>/blue/` to `s3://<bucket>/<dataset_name>/green/` and setting `StorageDescriptor.Columns` to match discovered schema types. No physical data files are copied or moved in S3, making the switch instantaneous and zero-cost. (Note: this updates catalog metadata pointers to correspond to the promoted dataset rather than providing database-style transactional atomicity).
 
 ---
 
 ### Q10: How does automated or manual Rollback work?
-**Answer**: If a problem is detected after activating GREEN, rollback is executed by updating the Glue Data Catalog table location back to `s3://bucket/curated/blue/`. Because the original `BLUE` dataset was preserved in S3, production queries immediately revert to reading known-good data without data recovery procedures.
+**Answer**: If an issue is discovered after promoting GREEN, rollback is executed by sending a rollback action specifying the dataset name (`{"action": "rollback", "dataset_name": "..."}`). Lambda updates the Glue Data Catalog table location back to `s3://<bucket>/<dataset_name>/blue/`. Because the original `BLUE` dataset was preserved in S3, production queries immediately revert to reading known-good data without data recovery procedures.
 
 ---
 
 ### Q11: How does Amazon CloudWatch monitor AWS Lambda executions?
-**Answer**: AWS Lambda automatically integrates with CloudWatch Logs. Every standard `print()` or Python `logging` statement executed inside `lambda_handler` is streamed directly to CloudWatch Log Group `/aws/lambda/dataflip-processor`. CloudWatch tracks invocation counts, duration, memory utilization, and errors natively.
+**Answer**: AWS Lambda automatically integrates with CloudWatch Logs. Every standard log event executed inside `lambda_handler` is streamed directly to CloudWatch Log Group `/aws/lambda/dataflip-processor`. CloudWatch tracks invocation counts, duration, memory utilization, and errors natively.
 
 ---
 
 ### Q12: What happens when the Lambda function fails during execution?
-**Answer**: If Lambda fails (e.g., validation exception or unhandled runtime error), the Glue Data Catalog update call is never executed. The catalog table location remains unchanged, pointing securely to `s3://bucket/curated/blue/`. CloudWatch records the error traceback for alerting.
+**Answer**: If Lambda validation fails (e.g. empty file, zero rows, corrupt Parquet), the Glue Data Catalog update call is never executed. The catalog table location remains unchanged, pointing securely to `s3://<bucket>/<dataset_name>/blue/`. The failure reason is logged to CloudWatch and recorded in `s3://<bucket>/<dataset_name>/manifest.json`.
 
 ---
 
@@ -75,16 +75,16 @@ This guide provides deep technical answers for the 15 key AWS Cloud Engineering 
 
 ### Q14: How does this architecture remain virtually free (low-cost)?
 **Answer**: The architecture is 100% serverless with zero always-running servers:
-* S3 micro-datasets consume <1MB (Free Tier provides 5GB).
+* S3 datasets consume minimal storage and fall within the 5GB Free Tier.
 * Lambda invocations fit well within 1,000,000 free monthly requests.
 * Glue Catalog operations fall within 1,000,000 free monthly requests.
 * Athena charges $5/TB scanned; scanning kilobytes costs <$0.0001 per query.
 
 ---
 
-### Q15: What would change for a production-scale implementation?
+### Q15: What would change for an enterprise-scale implementation?
 **Answer**: At enterprise scale:
-1. **S3 Partitioning**: Add date partitioning (`curated/year=2026/month=01/day=15/`) to limit Athena scanning scope.
+1. **S3 Partitioning**: Add partition projection or dynamic partitioning (`year=YYYY/month=MM/`) for multi-terabyte datasets.
 2. **EventBridge & Step Functions**: Use AWS Step Functions to orchestrate multi-step validation workflows across multiple Glue catalog tables.
 3. **AWS Lake Formation**: Implement fine-grained column-level and row-level access control over the Glue Data Catalog.
-4. **CloudWatch Alarms & SNS**: Trigger automated PagerDuty/Slack notifications upon validation failure.
+4. **CloudWatch Alarms & SNS**: Trigger automated notifications upon validation failure.
