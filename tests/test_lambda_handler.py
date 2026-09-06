@@ -1,5 +1,7 @@
 import json
+import io
 import importlib
+import pandas as pd
 from unittest.mock import MagicMock, patch
 
 lambda_module = importlib.import_module("lambda.handler")
@@ -156,3 +158,88 @@ def test_lambda_handler_glue_retry_exhaustion_returns_500(mock_boto_client):
     body = json.loads(response['body'])
     assert body['status'] == 'ERROR'
     assert mock_glue.update_table.call_count == 3
+
+@patch('boto3.client')
+def test_lambda_handler_s3_event_trigger_success(mock_boto_client):
+    """Test S3 ObjectCreated event notification triggers Parquet download and GREEN activation."""
+    mock_s3 = MagicMock()
+    mock_glue = MagicMock()
+
+    mock_boto_client.side_effect = lambda service: mock_s3 if service == 's3' else mock_glue
+
+    mock_glue.get_table.return_value = {
+        'Table': {
+            'Name': 'sales_curated',
+            'DatabaseName': 'dataflip_db',
+            'StorageDescriptor': {'Location': 's3://bucket/curated/blue/'}
+        }
+    }
+
+    # Synthesize valid Parquet binary payload
+    df = pd.DataFrame({'order_id': [1, 2], 'amount': [100.0, 200.0]})
+    buf = io.BytesIO()
+    df.to_parquet(buf, index=False)
+    mock_body = MagicMock()
+    mock_body.read.return_value = buf.getvalue()
+    mock_s3.get_object.return_value = {'Body': mock_body}
+
+    s3_event = {
+        "Records": [
+            {
+                "eventVersion": "2.1",
+                "eventSource": "aws:s3",
+                "s3": {
+                    "bucket": {"name": "dataflip-analytics-dev"},
+                    "object": {"key": "curated/green/sales.parquet"}
+                }
+            }
+        ]
+    }
+
+    response = lambda_handler(s3_event, None)
+    assert response['statusCode'] == 200
+    body = json.loads(response['body'])
+    assert body['status'] == 'ACTIVATED_GREEN'
+    assert "curated/green/sales.parquet" in body['source']
+    mock_s3.get_object.assert_called_once_with(
+        Bucket="dataflip-analytics-dev",
+        Key="curated/green/sales.parquet"
+    )
+    mock_glue.update_table.assert_called_once()
+    mock_s3.put_object.assert_called_once()
+
+@patch('boto3.client')
+def test_lambda_handler_s3_event_trigger_empty_rejection(mock_boto_client):
+    """Test S3 event with empty Parquet file rejects release and retains BLUE."""
+    mock_s3 = MagicMock()
+    mock_glue = MagicMock()
+
+    mock_boto_client.side_effect = lambda service: mock_s3 if service == 's3' else mock_glue
+
+    # Synthesize empty Parquet binary payload
+    df_empty = pd.DataFrame()
+    buf = io.BytesIO()
+    df_empty.to_parquet(buf, index=False)
+    mock_body = MagicMock()
+    mock_body.read.return_value = buf.getvalue()
+    mock_s3.get_object.return_value = {'Body': mock_body}
+
+    s3_event = {
+        "Records": [
+            {
+                "eventVersion": "2.1",
+                "eventSource": "aws:s3",
+                "s3": {
+                    "bucket": {"name": "dataflip-analytics-dev"},
+                    "object": {"key": "curated/green/empty.parquet"}
+                }
+            }
+        ]
+    }
+
+    response = lambda_handler(s3_event, None)
+    assert response['statusCode'] == 422
+    body = json.loads(response['body'])
+    assert body['status'] == 'REJECTED_GREEN'
+    mock_glue.update_table.assert_not_called()
+    mock_s3.put_object.assert_called_once()

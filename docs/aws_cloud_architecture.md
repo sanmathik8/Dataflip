@@ -4,17 +4,75 @@
 
 ---
 
+## 📐 Official AWS Cloud Architecture Diagram
+
+```mermaid
+flowchart TD
+    subgraph Ingestion_Storage [Amazon S3 — Serverless Data Lake Layer]
+        RAW_S3[📄 Amazon S3 raw/ Prefix — CSV Landing Zone]
+        BLUE_S3[🪣 Amazon S3 curated/blue/ Prefix — Production Dataset]
+        GREEN_S3[🪣 Amazon S3 curated/green/ Prefix — Candidate Staging]
+        REPORTS_S3[📁 Amazon S3 reports/ Prefix — Data Quality Artifacts]
+        MANIFEST_S3[📋 Amazon S3 curated/active_manifest.json — Audit Trail]
+    end
+
+    subgraph Validation_Compute [AWS Lambda — Serverless Compute Engine]
+        LAMBDA[⚡ AWS Lambda Function: dataflip-processor]
+        SCH_VAL[🔍 Schema & Range Constraints Validation]
+        DYN_PROF[📊 Dynamic Schema Discovery & Profiling]
+    end
+
+    subgraph Metastore_Catalog [AWS Glue Data Catalog — Central Metadata Repository]
+        GLUE_DB[🗄️ AWS Glue Database: dataflip_db]
+        GLUE_TBL[📋 AWS Glue External Table: sales_curated]
+        LOC_PTR[StorageDescriptor.Location Pointer]
+    end
+
+    subgraph Analytics_Execution [Amazon Athena — Decoupled SQL Query Engine]
+        ATHENA_SQL[📊 Amazon Athena SQL Engine]
+        BI_DASH[📈 QuickSight / BI Analytics Dashboards]
+    end
+
+    subgraph Security_Observability [AWS Identity, Security & Management]
+        IAM_ROLE[🔐 AWS IAM Execution Role & Scoped Policies]
+        CW_LOGS[🪵 Amazon CloudWatch Logs: /aws/lambda/dataflip-processor]
+    end
+
+    RAW_S3 -->|Stage Parquet| GREEN_S3
+    GREEN_S3 -->|Trigger Event| LAMBDA
+    IAM_ROLE -->|Grant Least-Privilege STS Credentials| LAMBDA
+    LAMBDA --> SCH_VAL
+    SCH_VAL -->|Validation PASSED| DYN_PROF
+    DYN_PROF -->|Save Metrics| REPORTS_S3
+    DYN_PROF -->|glue:UpdateTable API Call| GLUE_TBL
+    GLUE_TBL -->|Update Metadata Pointer| LOC_PTR
+    LOC_PTR -->|Point to s3://.../curated/green/| GREEN_S3
+    ATHENA_SQL -->|Read Table Metadata| GLUE_TBL
+    ATHENA_SQL -->|Query Active S3 Parquet| GREEN_S3
+    ATHENA_SQL --> BI_DASH
+    LAMBDA -->|Stream Execution Logs| CW_LOGS
+
+    SCH_VAL -.->|Validation FAILED / Rollback| BLUE_S3
+    BLUE_S3 -.->|Retain Location Pointer| LOC_PTR
+```
+
+
+---
+
+
 ## 1. Amazon S3 Storage Architecture & Security
 
 ### Bucket & Prefix Design
 ```text
 s3://dataflip-analytics-dev/
 ├── raw/                      # Landing zone for incoming CSV files
+├── reports/                  # Automated HTML EDA profiling reports (ydata-profiling)
 └── curated/
     ├── blue/                 # Active / Known-good production Parquet dataset
     ├── green/                # Candidate Parquet dataset undergoing validation
     └── active_manifest.json  # S3 metadata audit trail
 ```
+
 
 ### S3 Security Controls
 * **Block Public Access**: Enabled across all 4 S3 public access block settings (`IgnorePublicAcls`, `BlockPublicAcls`, `BlockPublicPolicy`, `RestrictPublicBuckets`).

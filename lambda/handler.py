@@ -1,6 +1,8 @@
 import os
+import io
 import json
 import time
+import urllib.parse
 import boto3
 import pandas as pd
 from botocore.exceptions import ClientError
@@ -105,15 +107,34 @@ def lambda_handler(event, context):
             logger.error(f"[Rollback Exception] {e}", exc_info=True)
             return {'statusCode': 500, 'body': json.dumps({'status': 'ERROR', 'message': str(e)})}
 
-    # 2. Candidate Data Processing
-    records = event.get('records', []) if isinstance(event, dict) else []
+    # 2. Candidate Data Ingestion (Manual Records vs. S3 Event Notification)
+    records = []
+    source_info = "manual"
+
+    if isinstance(event, dict) and "Records" in event and event["Records"] and "s3" in event["Records"][0]:
+        s3_meta = event["Records"][0]["s3"]
+        bucket_name = s3_meta.get("bucket", {}).get("name", S3_BUCKET)
+        object_key = urllib.parse.unquote_plus(s3_meta.get("object", {}).get("key", ""))
+        source_info = f"s3://{bucket_name}/{object_key}"
+        logger.info(f"Processing candidate data from S3 event: {source_info}")
+        try:
+            obj_resp = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+            parquet_bytes = obj_resp["Body"].read()
+            df = pd.read_parquet(io.BytesIO(parquet_bytes))
+            records = df.to_dict(orient="records")
+        except Exception as e:
+            logger.error(f"Failed to read Parquet object from {source_info}: {e}", exc_info=True)
+            records = []
+    elif isinstance(event, dict) and "records" in event:
+        records = event.get("records", [])
+
     is_valid, validation_msg = validate_records(records)
 
     if is_valid:
         green_location = f"s3://{S3_BUCKET}/curated/green/"
         try:
             update_glue_table_location(glue_client, GLUE_DATABASE, GLUE_TABLE, green_location)
-            _write_s3_manifest(s3_client, 'green', 'active', validation_msg, green_location)
+            _write_s3_manifest(s3_client, 'green', 'active', validation_msg, green_location, {'source': source_info})
             duration_ms = round((time.time() - start_time) * 1000, 2)
             return {
                 'statusCode': 200,
@@ -121,6 +142,7 @@ def lambda_handler(event, context):
                     'status': 'ACTIVATED_GREEN',
                     'message': validation_msg,
                     'active_location': green_location,
+                    'source': source_info,
                     'execution_time_ms': duration_ms
                 })
             }
@@ -130,7 +152,10 @@ def lambda_handler(event, context):
     else:
         blue_location = f"s3://{S3_BUCKET}/curated/blue/"
         try:
-            _write_s3_manifest(s3_client, 'blue', 'retained_on_failure', validation_msg, blue_location, {'rejection_reason': validation_msg})
+            _write_s3_manifest(s3_client, 'blue', 'retained_on_failure', validation_msg, blue_location, {
+                'rejection_reason': validation_msg,
+                'source': source_info
+            })
         except Exception as e:
             logger.error(f"[Manifest Error] {e}", exc_info=True)
 
@@ -141,6 +166,7 @@ def lambda_handler(event, context):
                 'status': 'REJECTED_GREEN',
                 'reason': validation_msg,
                 'active_location': blue_location,
+                'source': source_info,
                 'execution_time_ms': duration_ms
             })
         }

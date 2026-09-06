@@ -8,3 +8,10 @@ __pycache__/
 *.tfstate.*
 *.zip
 *.exe
+lambda_payload.zip
+data/payload.json
+data/rollback_payload.json
+data/manifest.json
+data/blue/*.parquet
+data/green/*.parquet
+data/output/*.parquet

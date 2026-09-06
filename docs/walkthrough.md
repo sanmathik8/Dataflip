@@ -8,39 +8,45 @@ The entire **DataFlip — Cloud-Based Analytics Data Switching System** has been
 D:\cloud_projects\dataflip
 ```
 
-All 15 project phases have been completed adhering strictly to cloud-first AWS principles, absolute Terraform safety (`apply` was NEVER executed), least-privilege security, zero-cost serverless architecture, and empirical test verification (17/17 pytest unit tests passing).
+All 15 project phases plus ydata-profiling EDA Data Quality report stage integration have been completed adhering strictly to cloud-first AWS principles, absolute Terraform safety (`apply` was NEVER executed), least-privilege security, zero-cost serverless architecture, and empirical test verification (18/18 pytest unit tests passing).
 
 ---
 
 ## 1. System Architecture & Component Mapping
 
 ```text
-                               DATAFLIP ARCHITECTURE
+                                DATAFLIP ARCHITECTURE
 
-                               Raw Input Data
-                                     ↓
-                             S3 (raw/ prefix)
-                                     ↓
-                          AWS Lambda Processor
-                                     ↓
-                          Generate GREEN Candidate
-                                     ↓
-                             Validate GREEN
-                             /            \
-                       FAIL                PASS
-                        ↓                    ↓
-                   Keep BLUE           Activate GREEN
-                  (Production)               ↓
-                                     Glue Catalog Pointer
-                                             ↓
-                                      Athena Analytics
+                                Raw Input Data
+                                      ↓
+                              S3 (raw/ prefix)
+                                      ↓
+                           AWS Lambda Processor
+                                      ↓
+                           Generate GREEN Candidate
+                                      ↓
+                              Validate GREEN
+                              /            \
+                        FAIL                PASS
+                         ↓                    ↓
+                    Keep BLUE           Activate GREEN
+                   (Production)               ↓
+                                       Glue Catalog Pointer
+                                              ↓
+                                       ydata-profiling (EDA Report)
+                                       ┌──────┴──────┐
+                                       ▼             ▼
+                                 Local reports/   S3 reports/
 ```
 
 - **S3 Bucket Layout**:
   - `s3://dataflip-analytics-dev/raw/`: Raw input CSV datasets.
   - `s3://dataflip-analytics-dev/curated/blue/`: Production known-good dataset.
   - `s3://dataflip-analytics-dev/curated/green/`: Candidate dataset.
+  - `s3://dataflip-analytics-dev/reports/`: Automated HTML EDA Data Quality reports.
 - **Glue Data Catalog**: Table `dataflip_db.sales_curated` whose `StorageDescriptor.Location` is the **authoritative switch** for Athena queries.
+- **Data Quality & EDA Profiling**: `ydata-profiling` integration generating HTML reports stored locally in `reports/` and uploaded to `s3://bucket/reports/`.
+
 - **AWS Lambda**: `dataflip-processor` handler validating datasets and executing the `glue.update_table` API call.
 - **AWS IAM**: Least privilege policy (`docs/iam_policy.json`) restricting access strictly to target S3 buckets, Glue tables, and CloudWatch log streams.
 

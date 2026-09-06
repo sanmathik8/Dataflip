@@ -32,11 +32,16 @@ resource "aws_iam_policy" "lambda_policy" {
         ]
       },
       {
-        Sid      = "GlueAccess"
-        Effect   = "Allow"
-        Action   = ["glue:GetTable", "glue:UpdateTable", "glue:GetDatabase"]
-        Resource = "*"
+        Sid    = "GlueAccess"
+        Effect = "Allow"
+        Action = ["glue:GetTable", "glue:UpdateTable", "glue:GetDatabase"]
+        Resource = [
+          "arn:aws:glue:*:*:catalog",
+          aws_glue_catalog_database.dataflip_db.arn,
+          aws_glue_catalog_table.sales_curated.arn
+        ]
       },
+
       {
         Sid      = "CloudWatchLogs"
         Effect   = "Allow"
