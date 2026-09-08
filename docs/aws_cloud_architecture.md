@@ -117,7 +117,7 @@ No `AdministratorAccess` is granted. Scoped permissions include:
 
 ### Execution Model & Trigger
 * **Runtime**: Python 3.11 / Python 3.14 compatible.
-* **Memory & Timeout**: 128 MB RAM, 30-second timeout.
+* **Memory & Timeout**: 512 MB RAM, 30-second timeout.
 * **Environment Variables**:
   - `S3_BUCKET`: Analytics S3 bucket identifier.
   - `GLUE_DATABASE`: `dataflip_db`.
@@ -135,6 +135,16 @@ No `AdministratorAccess` is granted. Scoped permissions include:
 7. **Handles Failure (FAIL)**:
    - Retains Glue Catalog location at `s3://<bucket>/<dataset_name>/blue/`.
    - Writes rejection reason to `manifest.json` and CloudWatch Logs.
+
+### Design Note: Invocation Modes & Cloud Deployment Status
+`lambda/handler.py` branches on the incoming event payload to support two distinct execution paths:
+1. **Live S3 ObjectCreated Events**: Configured via `aws_s3_bucket_notification` in [`terraform/s3_notification.tf`](../terraform/s3_notification.tf) (filtered to `.parquet` suffixes) and authorized via `aws_lambda_permission.allow_s3_invocation`. Uploading candidate files to `<dataset>/green/` triggers automatic schema validation and catalog promotion.
+2. **Direct JSON Invocation**: Programmatic invocation via AWS CLI (`aws lambda invoke`), SDK, or automated test suites:
+   - Rollback commands: `{"action": "rollback", "dataset_name": "<name>"}`
+   - Simulation / verification events: `{"Records": [{"s3": {...}}]}`
+
+**Deployment Status**:
+The S3 trigger infrastructure is fully defined and passes `terraform validate`. However, it is not currently `terraform apply`'d to a live AWS account (`terraform.tfstate` shows `resources: []`). This is deliberate, to avoid ongoing AWS idle costs during development and testing, rather than a missing architectural capability.
 
 ---
 

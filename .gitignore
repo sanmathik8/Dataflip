@@ -1,11 +1,36 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+**/__pycache__/
+
+# Environments
 .venv/
+venv/
+ENV/
 .env
+
+# Testing & Coverage
 .pytest_cache/
+**/.pytest_cache/
+.coverage
+htmlcov/
+
+# Terraform artifacts & local state
 .terraform/
+**/.terraform/
 *.tfstate
 *.tfstate.*
+**/*.tfstate
+**/*.tfstate.*
+
+# Archives & binaries
 *.zip
-*.exe
+**/*.zip
 lambda_payload.zip
+*.exe
+
+# OS generated
+.DS_Store
+Thumbs.db
+

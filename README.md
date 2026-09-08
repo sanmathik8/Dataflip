@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![AWS](https://img.shields.io/badge/AWS-S3_|_Lambda_|_Glue_|_Athena-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/)
 [![Terraform](https://img.shields.io/badge/IaC-Terraform-844FBA?logo=terraform&logoColor=white)](https://www.terraform.io/)
-[![Tests](https://img.shields.io/badge/Tests-20_Passed-brightgreen)](https://docs.pytest.org/)
+[![Tests](https://img.shields.io/badge/Tests-21_Passed-brightgreen)](https://docs.pytest.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A domain-agnostic, serverless platform for zero-downtime **Blue/Green data releases** on AWS.
@@ -54,6 +54,14 @@ flowchart LR
 7. **Audit Manifest**: Writes deployment status to `s3://<bucket>/<dataset_name>/manifest.json`.
 8. **Rollback**: Sending `{"action": "rollback", "dataset_name": "<dataset>"}` immediately reverts the Glue table pointer back to `s3://<bucket>/<dataset_name>/blue/`.
 
+### 💡 Design Note: Invocation Modes
+The Lambda engine (`lambda/handler.py`) supports two invocation paths and branches automatically based on payload shape:
+1. **Live S3 ObjectCreated Events**: Defined via `aws_s3_bucket_notification` in [`terraform/s3_notification.tf`](terraform/s3_notification.tf) (filtered to `.parquet` suffixes) and authorized via `aws_lambda_permission`. When candidate Parquet data lands in `<dataset>/green/`, S3 automatically fires an `ObjectCreated` event to invoke Lambda.
+2. **Direct JSON Invocation**: Direct invocation via the AWS CLI (`aws lambda invoke`), SDKs, or test suites using a direct JSON payload (e.g., `{"action": "rollback", "dataset_name": "<name>"}` for immediate rollback, or simulated S3 event records).
+
+> [!NOTE]
+> **Cloud Deployment Status**: The S3 trigger infrastructure is fully defined and passes `terraform validate`. However, it is not currently `terraform apply`'d to a live AWS account (`terraform.tfstate` shows `resources: []`). This is deliberate, to avoid ongoing AWS costs during development and testing, rather than a missing feature.
+
 ---
 
 ## 🏗️ What Was Implemented
@@ -63,7 +71,7 @@ flowchart LR
 | **Lambda Processor** | [`lambda/handler.py`](lambda/handler.py) | Dynamic dataset routing, PyArrow schema discovery, type conversion, Glue table create/update, optimistic locking retry, and rollback. |
 | **Infrastructure as Code** | [`terraform/`](terraform/) | Complete AWS setup: S3 bucket & event notifications, Glue database, Lambda function (512MB RAM), and least-privilege IAM policies. |
 | **Athena SQL** | [`sql/`](sql/) | Parameterized DDL template and analytical query patterns for dynamically created Glue tables. |
-| **Test Suite** | [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) | 20 unit and integration tests covering key parsing, type mappings, schema extraction, table creation, updates, concurrency retries, and rollback. |
+| **Test Suite** | [`tests/test_lambda_handler.py`](tests/test_lambda_handler.py) | 21 unit and integration tests covering key parsing, type mappings, schema extraction, table creation, updates, concurrency retries & race conditions, and rollback. |
 
 ---
 
@@ -87,7 +95,7 @@ dataflip/
 │   ├── iam.tf                  # Scoped least-privilege IAM roles and policies
 │   └── s3_notification.tf      # S3 event notification & Lambda permission
 ├── tests/
-│   ├── test_lambda_handler.py  # 20 unit & integration tests
+│   ├── test_lambda_handler.py  # 21 unit & integration tests
 │   └── __init__.py
 ├── docs/                       # Architecture deep-dive & interview Q&A
 ├── requirements.txt            # Production dependencies (boto3, pyarrow, powertools, pytest)

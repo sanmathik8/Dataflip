@@ -1,5 +1,6 @@
 import io
 import json
+import copy
 import importlib
 import pytest
 import pyarrow as pa
@@ -222,6 +223,103 @@ def test_promote_dataset_concurrency_retry_exhaustion():
         promote_dataset(mock_glue, 'dataflip_db', 'telemetry', 's3://bucket/telemetry/green/', [], max_retries=2)
 
     assert mock_glue.update_table.call_count == 2
+
+
+def test_concurrent_promotions_optimistic_locking_race(monkeypatch):
+    """
+    Simulate two workers racing to promote the same dataset:
+    - Worker A and Worker B both read Glue table version 1.
+    - Worker A commits green_run_1/ first and succeeds (Glue table version advances to 2).
+    - Worker B attempts to commit with stale version 1 and gets ConcurrentModificationException.
+    - Worker B's retry-with-backoff logic catches this, re-fetches version 2,
+      updates to green_run_2/ and its discovered columns, and commits successfully.
+    Asserts both workers finish cleanly, no corrupted/partial pointer state exists
+    at any point, and the final Glue table state matches Worker B's commit.
+    """
+    # Disable backoff sleep during deterministic unit test
+    monkeypatch.setattr('time.sleep', lambda s: None)
+
+    table_v1 = {
+        'Name': 'telemetry',
+        'DatabaseName': 'dataflip_db',
+        'StorageDescriptor': {
+            'Location': 's3://bucket/telemetry/blue/',
+            'Columns': [{'Name': 'old_col', 'Type': 'string'}]
+        }
+    }
+    table_v2 = {
+        'Name': 'telemetry',
+        'DatabaseName': 'dataflip_db',
+        'StorageDescriptor': {
+            'Location': 's3://bucket/telemetry/green_run_1/',
+            'Columns': [{'Name': 'id', 'Type': 'bigint'}, {'Name': 'col_a', 'Type': 'string'}]
+        }
+    }
+
+    mock_glue = MagicMock()
+    # Sequence of get_table calls:
+    # 1. Worker A reads table version 1
+    # 2. Worker B (attempt 1) reads table version 1 (both read initial state)
+    # 3. Worker B (attempt 2 retry) re-fetches updated table version 2
+    mock_glue.get_table.side_effect = [
+        {'Table': copy.deepcopy(table_v1)},
+        {'Table': copy.deepcopy(table_v1)},
+        {'Table': copy.deepcopy(table_v2)}
+    ]
+
+    concurrency_err = ClientError(
+        {'Error': {'Code': 'ConcurrentModificationException', 'Message': 'Table version modified'}},
+        'UpdateTable'
+    )
+
+    # Sequence of update_table calls:
+    # 1. Worker A commits green_run_1/ -> succeeds
+    # 2. Worker B attempt 1 commits with stale version 1 -> raises ConcurrentModificationException
+    # 3. Worker B attempt 2 commits green_run_2/ -> succeeds
+    mock_glue.update_table.side_effect = [
+        None,
+        concurrency_err,
+        None
+    ]
+
+    cols_worker_a = [{'Name': 'id', 'Type': 'bigint'}, {'Name': 'col_a', 'Type': 'string'}]
+    cols_worker_b = [{'Name': 'id', 'Type': 'bigint'}, {'Name': 'col_b', 'Type': 'int'}]
+
+    loc_worker_a = 's3://bucket/telemetry/green_run_1/'
+    loc_worker_b = 's3://bucket/telemetry/green_run_2/'
+
+    # Worker A runs and promotes green_run_1/
+    promote_dataset(mock_glue, 'dataflip_db', 'telemetry', loc_worker_a, cols_worker_a)
+
+    # Worker B runs, hits conflict on attempt 1, retries, and succeeds on attempt 2
+    promote_dataset(mock_glue, 'dataflip_db', 'telemetry', loc_worker_b, cols_worker_b)
+
+    # Assert call counts
+    assert mock_glue.get_table.call_count == 3
+    assert mock_glue.update_table.call_count == 3
+
+    # Assert no corrupted/partial pointer state existed across any commit attempt
+    for call in mock_glue.update_table.call_args_list:
+        table_input = call[1]['TableInput']
+        storage_desc = table_input['StorageDescriptor']
+        assert storage_desc['Location'].startswith('s3://bucket/telemetry/green_run_')
+        assert isinstance(storage_desc['Columns'], list)
+        assert len(storage_desc['Columns']) > 0
+
+    # Worker A's committed state
+    worker_a_input = mock_glue.update_table.call_args_list[0][1]['TableInput']
+    assert worker_a_input['StorageDescriptor']['Location'] == loc_worker_a
+    assert worker_a_input['StorageDescriptor']['Columns'] == cols_worker_a
+
+    # Worker B's first attempt (rejected with ConcurrentModificationException)
+    worker_b_attempt_1 = mock_glue.update_table.call_args_list[1][1]['TableInput']
+    assert worker_b_attempt_1['StorageDescriptor']['Location'] == loc_worker_b
+    assert worker_b_attempt_1['StorageDescriptor']['Columns'] == cols_worker_b
+
+    # Final Glue table state matches the last successful commit (Worker B)
+    final_input = mock_glue.update_table.call_args_list[2][1]['TableInput']
+    assert final_input['StorageDescriptor']['Location'] == loc_worker_b
+    assert final_input['StorageDescriptor']['Columns'] == cols_worker_b
 
 
 def test_rollback_dataset():
