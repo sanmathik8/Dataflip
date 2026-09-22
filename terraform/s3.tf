@@ -82,15 +82,4 @@ resource "aws_s3_bucket_policy" "enforce_tls" {
   })
 }
 
-# S3 Key Prefixes for Default Namespaces
-resource "aws_s3_object" "curated_blue_prefix" {
-  bucket = aws_s3_bucket.analytics.id
-  key    = "curated/blue/"
-}
-
-resource "aws_s3_object" "curated_green_prefix" {
-  bucket = aws_s3_bucket.analytics.id
-  key    = "curated/green/"
-}
-
 

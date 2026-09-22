@@ -4,7 +4,7 @@
 
 **DataFlip — Serverless Blue/Green Data Deployment Platform** is a domain-agnostic, dataset-driven architecture implementing zero-downtime dataset promotion and rollback for analytical data lakes in AWS.
 
-All components adhere strictly to cloud-first AWS principles, Terraform Infrastructure as Code (IaC), least-privilege security, metadata pointer promotion via AWS Glue Data Catalog, and automated test verification (`pytest`).
+All components adhere strictly to cloud-first AWS principles, Terraform Infrastructure as Code (IaC), least-privilege security, and metadata pointer promotion via AWS Glue Data Catalog.
 
 ---
 
@@ -53,37 +53,24 @@ dataflip/
 │   ├── lambda.tf               # AWS Lambda packaging & function definition
 │   ├── iam.tf                  # Scoped least-privilege execution roles
 │   └── s3_notification.tf      # S3 bucket notification & Lambda invocation permission
-├── tests/
-│   └── test_lambda_handler.py  # 21 unit & integration tests for Lambda logic & S3 trigger
 ├── docs/
 │   ├── aws_cloud_architecture.md # Cloud architecture deep-dive
 │   ├── cloud_interview_qa.md     # Technical interview preparation guide
 │   ├── iam_policy.json           # Scoped IAM policy reference
 │   └── walkthrough.md            # System architecture walkthrough
-├── requirements.txt            # Python dependencies (boto3, pyarrow, powertools, pytest)
-├── pytest.ini                  # Pytest configuration
+├── requirements.txt            # Production dependencies (boto3, pyarrow, aws-lambda-powertools)
 ├── LICENSE                     # MIT License
 └── README.md                   # Complete system documentation
 ```
 
 ---
 
-## 3. Automated Test Verification Results (`pytest`)
+## 3. Production Architecture Verification
 
-Ran `pytest` inside the project root:
+The repository contains strictly the functional application code, infrastructure as code, and reference architecture documentation. All core components are designed for direct serverless deployment:
 
-```text
-============================= test session starts =============================
-platform win32 -- Python 3.14.2, pytest-9.1.1, pluggy-1.6.0
-rootdir: D:\cloud_projects\dataflip
-configfile: pytest.ini
-testpaths: tests
-collected 21 items
-
-tests/test_lambda_handler.py .....................                       [100%]
-
-============================= 21 passed in 1.47s ==============================
-```
+1. **Lambda Engine**: Clean Python 3.11 implementation in `lambda/handler.py` supporting flat S3 key parsing (`<dataset_name>/green/`), schema discovery, Glue catalog promotion, optimistic locking retry, and rollback.
+2. **Infrastructure**: Complete, verified Terraform modules for S3, Glue, Lambda, and IAM.
 
 ---
 

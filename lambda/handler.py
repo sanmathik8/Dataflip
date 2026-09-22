@@ -34,12 +34,12 @@ def sanitize_dataset_name(raw_name: str) -> str:
 def parse_s3_key(key: str) -> dict | None:
     """
     Parse an S3 object key to extract dataset_name, slot ('green' or 'blue'), and filename.
-    Matches paths such as:
+    Strictly enforces flat dataset layout:
       - '<dataset>/green/<filename>.parquet'
-      - 'curated/<dataset>/green/<filename>.parquet'
-      - 'staging/<dataset>/green/<filename>.parquet'
+      - '<dataset>/blue/<filename>.parquet'
+    Nested namespaces (e.g. 'curated/<dataset>/green/<filename>.parquet') are rejected.
     """
-    match = re.search(r'(?:^|/)(?P<dataset>[a-zA-Z0-9_-]+)/(?P<slot>green|blue)/(?P<filename>[^/]+)$', key)
+    match = re.match(r'^(?P<dataset>[a-zA-Z0-9_-]+)/(?P<slot>green|blue)/(?P<filename>[^/]+)$', key)
     if not match:
         return None
     return {
