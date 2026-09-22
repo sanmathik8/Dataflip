@@ -21,6 +21,7 @@ READ_ONLY_GLUE_KEYS = {
     'IsMultiDialectView', 'IsMaterializedView'
 }
 
+
 def sanitize_dataset_name(raw_name: str) -> str:
     """
     Sanitize dataset name to comply with AWS Glue Data Catalog table naming rules
@@ -28,6 +29,7 @@ def sanitize_dataset_name(raw_name: str) -> str:
     """
     cleaned = re.sub(r'[^a-zA-Z0-9_]', '_', raw_name).strip('_').lower()
     return cleaned or "default_dataset"
+
 
 def parse_s3_key(key: str) -> dict | None:
     """
@@ -45,6 +47,7 @@ def parse_s3_key(key: str) -> dict | None:
         'slot': match.group('slot'),
         'filename': match.group('filename')
     }
+
 
 def pyarrow_to_glue_type(arrow_type: pa.DataType) -> str:
     """Map a PyArrow DataType to an AWS Glue / Athena Data Catalog column type."""
@@ -73,9 +76,11 @@ def pyarrow_to_glue_type(arrow_type: pa.DataType) -> str:
     else:
         return 'string'
 
+
 def extract_glue_columns(schema: pa.Schema) -> list[dict]:
     """Convert PyArrow schema fields into AWS Glue Catalog column definitions."""
     return [{'Name': field.name, 'Type': pyarrow_to_glue_type(field.type)} for field in schema]
+
 
 def inspect_and_validate_parquet(parquet_bytes: bytes) -> tuple[bool, str, list[dict], int]:
     """
@@ -102,6 +107,7 @@ def inspect_and_validate_parquet(parquet_bytes: bytes) -> tuple[bool, str, list[
     except Exception as e:
         return False, f"Validation Failed: Invalid Parquet file - {str(e)}", [], 0
 
+
 def validate_records(records: list[dict]) -> tuple[bool, str]:
     """Validate data records generically using PyArrow."""
     if not records:
@@ -115,6 +121,7 @@ def validate_records(records: list[dict]) -> tuple[bool, str]:
     except Exception as e:
         return False, f"Validation Failed: {e}"
     return True, f"Validation Passed: {len(records)} records validated successfully"
+
 
 def promote_dataset(glue_client, database: str, dataset_name: str, new_s3_location: str, glue_columns: list[dict], max_retries: int = 3):
     """
@@ -177,6 +184,7 @@ def promote_dataset(glue_client, database: str, dataset_name: str, new_s3_locati
             if attempt >= max_retries:
                 raise
 
+
 def rollback_dataset(glue_client, database: str, dataset_name: str, blue_s3_location: str, max_retries: int = 3):
     """
     Roll back Glue Data Catalog table location to the known-good BLUE dataset prefix.
@@ -204,7 +212,8 @@ def rollback_dataset(glue_client, database: str, dataset_name: str, blue_s3_loca
             if attempt >= max_retries:
                 raise
 
-def _write_s3_manifest(s3_client, bucket: str, dataset_name: str, active_slot: str, status: str, message: str, location: str, extra: dict = None) -> None:
+
+def _write_s3_manifest(s3_client, bucket: str, dataset_name: str, active_slot: str, status: str, message: str, location: str, extra: dict | None = None) -> None:
     """Write dataset deployment manifest metadata to S3."""
     payload = {
         'dataset_name': dataset_name,
@@ -222,6 +231,7 @@ def _write_s3_manifest(s3_client, bucket: str, dataset_name: str, active_slot: s
         Key=manifest_key,
         Body=json.dumps(payload, indent=2)
     )
+
 
 def lambda_handler(event, context):
     """
@@ -245,12 +255,12 @@ def lambda_handler(event, context):
                 'body': json.dumps({'status': 'ERROR', 'message': 'dataset_name is required for rollback action'})
             }
         dataset_name = sanitize_dataset_name(raw_dataset)
-        
+
         blue_location = f"s3://{S3_BUCKET}/{dataset_name}/blue/"
         try:
             rollback_dataset(glue_client, GLUE_DATABASE, dataset_name, blue_location)
             _write_s3_manifest(s3_client, S3_BUCKET, dataset_name, 'blue', 'rolled_back',
-                               f"Production dataset reverted to BLUE", blue_location)
+                               "Production dataset reverted to BLUE", blue_location)
             duration_ms = round((time.time() - start_time) * 1000, 2)
             return {
                 'statusCode': 200,

@@ -118,6 +118,7 @@ No `AdministratorAccess` is granted. Scoped permissions include:
 ### Execution Model & Trigger
 * **Runtime**: Python 3.11 / Python 3.14 compatible.
 * **Memory & Timeout**: 512 MB RAM, 30-second timeout.
+* **Layers**: Configured via `lambda_layer_arns` in Terraform (provides `pyarrow` and `aws-lambda-powertools` in AWS).
 * **Environment Variables**:
   - `S3_BUCKET`: Analytics S3 bucket identifier.
   - `GLUE_DATABASE`: `dataflip_db`.

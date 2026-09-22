@@ -29,6 +29,7 @@ def test_sanitize_dataset_name():
     assert sanitize_dataset_name("My-Dataset_01") == "my_dataset_01"
     assert sanitize_dataset_name("---") == "default_dataset"
 
+
 def test_parse_s3_key_valid_patterns():
     # Direct dataset path
     res1 = parse_s3_key("telemetry/green/metrics.parquet")

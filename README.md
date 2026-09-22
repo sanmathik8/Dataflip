@@ -100,6 +100,7 @@ dataflip/
 ├── docs/                       # Architecture deep-dive & interview Q&A
 ├── requirements.txt            # Production dependencies (boto3, pyarrow, powertools, pytest)
 ├── pytest.ini                  # Pytest configuration
+├── LICENSE                     # MIT License
 └── README.md                   # System documentation
 ```
 
@@ -123,6 +124,10 @@ terraform init
 terraform plan
 terraform apply
 ```
+
+> [!TIP]
+> **Lambda Layer Prerequisite for Live Cloud Execution**:
+> The Lambda function runtime requires `pyarrow` and `aws-lambda-powertools`. For live AWS deployments, specify appropriate layer ARNs (such as the AWS-managed `AWSSDKPandas-Python311` layer and Powertools layer) via `-var='lambda_layer_arns=["..."]'` or within a `terraform.tfvars` file.
 
 ---
 

@@ -54,14 +54,15 @@ dataflip/
 │   ├── iam.tf                  # Scoped least-privilege execution roles
 │   └── s3_notification.tf      # S3 bucket notification & Lambda invocation permission
 ├── tests/
-│   └── test_lambda_handler.py  # 19 unit & integration tests for Lambda logic & S3 trigger
+│   └── test_lambda_handler.py  # 21 unit & integration tests for Lambda logic & S3 trigger
 ├── docs/
 │   ├── aws_cloud_architecture.md # Cloud architecture deep-dive
 │   ├── cloud_interview_qa.md     # Technical interview preparation guide
 │   ├── iam_policy.json           # Scoped IAM policy reference
 │   └── walkthrough.md            # System architecture walkthrough
-├── requirements.txt            # Python dependencies (boto3, pandas, pyarrow, powertools, pytest)
+├── requirements.txt            # Python dependencies (boto3, pyarrow, powertools, pytest)
 ├── pytest.ini                  # Pytest configuration
+├── LICENSE                     # MIT License
 └── README.md                   # Complete system documentation
 ```
 
@@ -77,11 +78,11 @@ platform win32 -- Python 3.14.2, pytest-9.1.1, pluggy-1.6.0
 rootdir: D:\cloud_projects\dataflip
 configfile: pytest.ini
 testpaths: tests
-collected 19 items
+collected 21 items
 
-tests/test_lambda_handler.py ...................                         [100%]
+tests/test_lambda_handler.py .....................                       [100%]
 
-============================= 19 passed in 1.47s ==============================
+============================= 21 passed in 1.47s ==============================
 ```
 
 ---
