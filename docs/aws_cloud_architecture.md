@@ -118,7 +118,7 @@ No `AdministratorAccess` is granted. Scoped permissions include:
 ### Execution Model & Trigger
 * **Runtime**: Python 3.11 / Python 3.14 compatible.
 * **Memory & Timeout**: 512 MB RAM, 30-second timeout.
-* **Layers**: Configured via `lambda_layer_arns` in Terraform (provides `pyarrow` and `aws-lambda-powertools` in AWS).
+* **Layers**: Configured via `lambda_layer_arns` in Terraform (provides `pyarrow` in AWS).
 * **Environment Variables**:
   - `S3_BUCKET`: Analytics S3 bucket identifier.
   - `GLUE_DATABASE`: `dataflip_db`.
@@ -200,7 +200,7 @@ SELECT COUNT(*) AS total_records FROM dataflip_db.<dataset_name>;
 ## 6. Amazon CloudWatch Logging & Observability
 
 * **Log Group**: `/aws/lambda/dataflip-processor`
-* **Log Output**: Structured JSON logging powered by AWS Lambda Powertools, recording invocation request IDs, dataset names, execution durations, validation status, catalog updates, and rollback actions.
+* **Log Output**: Standardized logging powered by Python's built-in `logging` module, recording dataset names, execution durations, validation status, catalog updates, and rollback actions.
 
 ---
 

@@ -93,7 +93,7 @@ dataflip/
 │   ├── iam.tf                  # Scoped least-privilege IAM roles and policies
 │   └── s3_notification.tf      # S3 event notification & Lambda permission
 ├── docs/                       # Architecture deep-dive & interview Q&A
-├── requirements.txt            # Production dependencies (boto3, pyarrow, aws-lambda-powertools)
+├── requirements.txt            # Production dependencies (boto3, pyarrow)
 ├── LICENSE                     # MIT License
 └── README.md                   # System documentation
 ```
@@ -119,7 +119,7 @@ terraform apply
 
 > [!TIP]
 > **Lambda Layer Prerequisite for Live Cloud Execution**:
-> The Lambda function runtime requires `pyarrow` and `aws-lambda-powertools`. For live AWS deployments, specify appropriate layer ARNs (such as the AWS-managed `AWSSDKPandas-Python311` layer and Powertools layer) via `-var='lambda_layer_arns=["..."]'` or within a `terraform.tfvars` file.
+> The Lambda function runtime requires `pyarrow`. For live AWS deployments, specify an appropriate layer ARN (such as the AWS-managed `AWSSDKPandas-Python311` layer) via `-var='lambda_layer_arns=["..."]'` or within a `terraform.tfvars` file.
 
 ---
 

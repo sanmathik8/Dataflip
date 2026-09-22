@@ -58,7 +58,7 @@ dataflip/
 │   ├── cloud_interview_qa.md     # Technical interview preparation guide
 │   ├── iam_policy.json           # Scoped IAM policy reference
 │   └── walkthrough.md            # System architecture walkthrough
-├── requirements.txt            # Production dependencies (boto3, pyarrow, aws-lambda-powertools)
+├── requirements.txt            # Production dependencies (boto3, pyarrow)
 ├── LICENSE                     # MIT License
 └── README.md                   # Complete system documentation
 ```
