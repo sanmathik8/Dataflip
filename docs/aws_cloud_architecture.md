@@ -200,7 +200,7 @@ SELECT COUNT(*) AS total_records FROM dataflip_db.<dataset_name>;
 ## 6. Amazon CloudWatch Logging & Observability
 
 * **Log Group**: `/aws/lambda/dataflip-processor`
-* **Log Output**: Standardized logging powered by Python's built-in `logging` module, recording dataset names, execution durations, validation status, catalog updates, and rollback actions.
+* **Log Output**: Streamed directly to CloudWatch Logs, recording dataset names, validation status, catalog updates, and rollback actions.
 
 ---
 
