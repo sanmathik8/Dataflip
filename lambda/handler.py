@@ -76,6 +76,7 @@ def validate_parquet(data):
     """
 
     try:
+
         reader = pq.ParquetFile(
             io.BytesIO(data)
         )
@@ -107,6 +108,23 @@ def validate_parquet(data):
         return False, [], 0
 
 
+def promote_green_to_blue(dataset, filename):
+    """
+    Copy the validated GREEN file to BLUE.
+
+    BLUE always represents the current production dataset.
+    """
+
+    s3.copy_object(
+        Bucket=S3_BUCKET,
+        CopySource={
+            "Bucket": S3_BUCKET,
+            "Key": f"{dataset}/green/{filename}"
+        },
+        Key=f"{dataset}/blue/{filename}"
+    )
+
+
 def set_glue_table_pointer(dataset, location, columns):
     """
     Create or update Glue table
@@ -114,6 +132,7 @@ def set_glue_table_pointer(dataset, location, columns):
     """
 
     try:
+
         # Check whether the Glue table already exists
         table = glue.get_table(
             DatabaseName=GLUE_DATABASE,
@@ -319,24 +338,30 @@ def lambda_handler(event, context):
 
 
     # =========================================================
-    # 6. ACTIVATE GREEN OR REJECT
+    # 6. ACTIVATE GREEN
     # =========================================================
 
     if is_valid:
 
-        # Point Glue to GREEN
+        # Promote validated GREEN file to BLUE
+        promote_green_to_blue(
+            dataset,
+            filename
+        )
+
+        # Glue always points to current production BLUE
         set_glue_table_pointer(
             dataset,
-            green_location,
+            blue_location,
             columns
         )
 
         # Record successful deployment
         write_manifest(
             dataset,
-            "green",
+            "blue",
             "activated",
-            green_location,
+            blue_location,
             rows,
             len(columns)
         )
