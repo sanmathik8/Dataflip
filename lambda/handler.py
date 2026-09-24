@@ -1,61 +1,22 @@
 import io
 import json
-import logging
 import os
 import re
-import time
 import urllib.parse
 from datetime import datetime, timezone
 
 import boto3
 import pyarrow as pa
 import pyarrow.parquet as pq
-from botocore.exceptions import ClientError
 
-
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
 
 s3 = boto3.client("s3")
 glue = boto3.client("glue")
 
-S3_BUCKET = os.environ.get(
-    "S3_BUCKET",
-    "dataflip-analytics-dev"
-)
-
-GLUE_DATABASE = os.environ.get(
-    "GLUE_DATABASE",
-    "dataflip_db"
-)
-
-ENFORCE_SCHEMA_COMPAT = (
-    os.environ.get(
-        "ENFORCE_SCHEMA_COMPAT",
-        "true"
-    ).lower() == "true"
-)
+S3_BUCKET = os.environ.get("S3_BUCKET", "dataflip-analytics-dev")
+GLUE_DATABASE = os.environ.get("GLUE_DATABASE", "dataflip_db")
 
 SLOTS = ("blue", "green")
-INCOMING_PREFIX = "incoming"
-GLUE_RETRIES = 5
-
-GLUE_TABLE_INPUT_KEYS = (
-    "Name",
-    "Description",
-    "Owner",
-    "Retention",
-    "StorageDescriptor",
-    "PartitionKeys",
-    "ViewOriginalText",
-    "ViewExpandedText",
-    "TableType",
-    "Parameters",
-)
-
-
-def now_iso():
-    return datetime.now(timezone.utc).isoformat()
 
 
 def sanitize_name(name):
@@ -69,7 +30,6 @@ def sanitize_name(name):
 def other_slot(slot):
     if slot == "blue":
         return "green"
-
     return "blue"
 
 
@@ -85,17 +45,8 @@ def manifest_key(dataset):
     return f"{dataset}/manifest.json"
 
 
-def slot_from_location(location):
-    if not location:
-        return None
-
-    location = location.rstrip("/")
-
-    for slot in SLOTS:
-        if location.endswith(f"/{slot}"):
-            return slot
-
-    return None
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def parse_incoming_key(key):
@@ -103,7 +54,7 @@ def parse_incoming_key(key):
 
     if (
         len(parts) == 3
-        and parts[0] == INCOMING_PREFIX
+        and parts[0] == "incoming"
         and parts[2].lower().endswith(".parquet")
     ):
         dataset = sanitize_name(parts[1])
@@ -115,7 +66,6 @@ def parse_incoming_key(key):
 
 
 def arrow_to_glue_type(dtype):
-
     if pa.types.is_integer(dtype):
         return "bigint"
 
@@ -123,9 +73,7 @@ def arrow_to_glue_type(dtype):
         return "double"
 
     if pa.types.is_decimal(dtype):
-        return (
-            f"decimal({dtype.precision},{dtype.scale})"
-        )
+        return f"decimal({dtype.precision},{dtype.scale})"
 
     if pa.types.is_boolean(dtype):
         return "boolean"
@@ -140,36 +88,23 @@ def arrow_to_glue_type(dtype):
 
 
 def validate_parquet(data):
-
     try:
         reader = pq.ParquetFile(
             io.BytesIO(data)
         )
 
         if reader.metadata.num_rows == 0:
-            return (
-                False,
-                [],
-                0,
-                "file has zero rows"
-            )
+            return False, [], 0
 
         if len(reader.schema_arrow) == 0:
-            return (
-                False,
-                [],
-                0,
-                "file has no columns"
-            )
+            return False, [], 0
 
         reader.read_row_group(0)
 
         columns = [
             {
                 "Name": field.name,
-                "Type": arrow_to_glue_type(
-                    field.type
-                )
+                "Type": arrow_to_glue_type(field.type)
             }
             for field in reader.schema_arrow
         ]
@@ -177,60 +112,19 @@ def validate_parquet(data):
         return (
             True,
             columns,
-            reader.metadata.num_rows,
-            ""
+            reader.metadata.num_rows
         )
 
-    except Exception as exc:
-        return (
-            False,
-            [],
-            0,
-            f"unreadable parquet: {exc}"
-        )
-
-
-def schema_problems(
-    active_columns,
-    new_columns
-):
-
-    new_types = {
-        column["Name"].lower(): column["Type"]
-        for column in new_columns
-    }
-
-    problems = []
-
-    for column in active_columns:
-
-        name = column["Name"].lower()
-
-        if name not in new_types:
-            problems.append(
-                f"missing column '{name}'"
-            )
-
-        elif new_types[name] != column["Type"]:
-            problems.append(
-                f"type of '{name}' changed "
-                f"{column['Type']} -> {new_types[name]}"
-            )
-
-    return problems
+    except Exception:
+        return False, [], 0
 
 
 def delete_prefix(prefix):
-
     if not any(
-        prefix.endswith(f"/{slot}/")
+        prefix.endswith(f"{slot}/")
         for slot in SLOTS
     ):
-        raise ValueError(
-            f"refusing to delete non-slot prefix: {prefix}"
-        )
-
-    deleted = 0
+        raise ValueError("Invalid slot prefix")
 
     paginator = s3.get_paginator(
         "list_objects_v2"
@@ -240,17 +134,12 @@ def delete_prefix(prefix):
         Bucket=S3_BUCKET,
         Prefix=prefix
     ):
-
         objects = [
             {"Key": obj["Key"]}
-            for obj in page.get(
-                "Contents",
-                []
-            )
+            for obj in page.get("Contents", [])
         ]
 
         if objects:
-
             s3.delete_objects(
                 Bucket=S3_BUCKET,
                 Delete={
@@ -259,104 +148,41 @@ def delete_prefix(prefix):
                 }
             )
 
-            deleted += len(objects)
 
-    return deleted
-
-
-def prefix_has_objects(prefix):
-
-    response = s3.list_objects_v2(
-        Bucket=S3_BUCKET,
-        Prefix=prefix,
-        MaxKeys=1
-    )
-
-    return response.get(
-        "KeyCount",
-        0
-    ) > 0
-
-
-def source_id_for(
-    s3_object,
-    key
-):
-
-    etag = s3_object.get("eTag")
-
-    if not etag:
-
-        etag = s3.head_object(
+def load_manifest(dataset):
+    try:
+        response = s3.get_object(
             Bucket=S3_BUCKET,
-            Key=key
-        )["ETag"]
+            Key=manifest_key(dataset)
+        )
 
-    etag = etag.strip('"')
+        stored = json.loads(
+            response["Body"].read()
+        )
 
-    return f"{key}#{etag}"
+    except s3.exceptions.NoSuchKey:
+        stored = {}
 
-
-def new_manifest(dataset):
-
-    return {
+    default_manifest = {
         "dataset": dataset,
         "active_slot": None,
         "previous_slot": None,
         "version": 0,
         "slots": {},
-        "last_status": None,
         "last_source_id": None,
-        "last_reason": "",
+        "last_status": None,
         "updated_at": None
     }
 
+    default_manifest.update(stored)
 
-def load_manifest(dataset):
+    if "slots" not in default_manifest:
+        default_manifest["slots"] = {}
 
-    try:
-
-        body = s3.get_object(
-            Bucket=S3_BUCKET,
-            Key=manifest_key(dataset)
-        )["Body"].read()
-
-        stored = json.loads(body)
-
-    except ClientError as exc:
-
-        error_code = exc.response[
-            "Error"
-        ].get("Code")
-
-        if error_code in (
-            "NoSuchKey",
-            "404",
-            "NotFound"
-        ):
-            stored = {}
-
-        else:
-            raise
-
-    manifest = new_manifest(dataset)
-
-    manifest.update(stored)
-
-    if not isinstance(
-        manifest.get("slots"),
-        dict
-    ):
-        manifest["slots"] = {}
-
-    return manifest
+    return default_manifest
 
 
-def write_manifest(
-    dataset,
-    manifest
-):
-
+def write_manifest(dataset, manifest):
     manifest["updated_at"] = now_iso()
 
     s3.put_object(
@@ -370,55 +196,27 @@ def write_manifest(
     )
 
 
-def glue_active_slot(dataset):
-
+def get_active_slot(dataset, manifest):
     try:
-
         table = glue.get_table(
             DatabaseName=GLUE_DATABASE,
             Name=dataset
         )["Table"]
 
+        location = table[
+            "StorageDescriptor"
+        ].get("Location", "")
+
+        for slot in SLOTS:
+            if location.rstrip("/").endswith(
+                f"/{slot}"
+            ):
+                return slot
+
     except glue.exceptions.EntityNotFoundException:
+        pass
 
-        return None
-
-    location = table[
-        "StorageDescriptor"
-    ].get("Location")
-
-    return slot_from_location(location)
-
-
-def resolve_active_slot(
-    dataset,
-    manifest
-):
-
-    manifest_slot = manifest.get(
-        "active_slot"
-    )
-
-    glue_slot = glue_active_slot(
-        dataset
-    )
-
-    if (
-        glue_slot
-        and glue_slot != manifest_slot
-    ):
-
-        logger.warning(
-            "Manifest and Glue disagree for %s: "
-            "manifest=%s glue=%s",
-            dataset,
-            manifest_slot,
-            glue_slot
-        )
-
-        return glue_slot
-
-    return manifest_slot
+    return manifest.get("active_slot")
 
 
 def set_glue_table_pointer(
@@ -426,141 +224,109 @@ def set_glue_table_pointer(
     location,
     columns
 ):
+    try:
+        table = glue.get_table(
+            DatabaseName=GLUE_DATABASE,
+            Name=dataset
+        )["Table"]
 
-    if not columns:
-        raise ValueError(
-            "refusing to write Glue table with no columns"
+        table_input = {
+            "Name": table["Name"],
+            "TableType": table.get(
+                "TableType",
+                "EXTERNAL_TABLE"
+            ),
+            "Parameters": table.get(
+                "Parameters",
+                {}
+            ),
+            "StorageDescriptor": table[
+                "StorageDescriptor"
+            ]
+        }
+
+        table_input[
+            "StorageDescriptor"
+        ]["Location"] = location
+
+        table_input[
+            "StorageDescriptor"
+        ]["Columns"] = columns
+
+        glue.update_table(
+            DatabaseName=GLUE_DATABASE,
+            TableInput=table_input
         )
 
-    for attempt in range(
-        GLUE_RETRIES
-    ):
+    except glue.exceptions.EntityNotFoundException:
 
-        try:
-
-            try:
-
-                table = glue.get_table(
-                    DatabaseName=GLUE_DATABASE,
-                    Name=dataset
-                )["Table"]
-
-            except glue.exceptions.EntityNotFoundException:
-
-                glue.create_table(
-                    DatabaseName=GLUE_DATABASE,
-                    TableInput={
-                        "Name": dataset,
-                        "TableType": "EXTERNAL_TABLE",
-                        "Parameters": {
-                            "classification": "parquet",
-                            "EXTERNAL": "TRUE"
-                        },
-                        "StorageDescriptor": {
-                            "Location": location,
-                            "InputFormat":
-                                "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat",
-                            "OutputFormat":
-                                "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat",
-                            "SerdeInfo": {
-                                "SerializationLibrary":
-                                    "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
-                            },
-                            "Columns": columns
-                        }
-                    }
-                )
-
-                return
-
-            table_input = {
-                key: value
-                for key, value in table.items()
-                if key in GLUE_TABLE_INPUT_KEYS
+        glue.create_table(
+            DatabaseName=GLUE_DATABASE,
+            TableInput={
+                "Name": dataset,
+                "TableType": "EXTERNAL_TABLE",
+                "Parameters": {
+                    "classification": "parquet"
+                },
+                "StorageDescriptor": {
+                    "Location": location,
+                    "InputFormat":
+                        "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat",
+                    "OutputFormat":
+                        "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat",
+                    "SerdeInfo": {
+                        "SerializationLibrary":
+                            "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+                    },
+                    "Columns": columns
+                }
             }
-
-            storage_descriptor = dict(
-                table_input["StorageDescriptor"]
-            )
-
-            storage_descriptor[
-                "Location"
-            ] = location
-
-            storage_descriptor[
-                "Columns"
-            ] = columns
-
-            table_input[
-                "StorageDescriptor"
-            ] = storage_descriptor
-
-            glue.update_table(
-                DatabaseName=GLUE_DATABASE,
-                TableInput=table_input
-            )
-
-            return
-
-        except (
-            glue.exceptions.ConcurrentModificationException,
-            glue.exceptions.AlreadyExistsException
-        ):
-
-            time.sleep(
-                0.2 * (2 ** attempt)
-            )
-
-    raise RuntimeError(
-        f"Glue update for {dataset} "
-        f"failed after {GLUE_RETRIES} attempts"
-    )
+        )
 
 
-def deploy_record(record):
+def get_source_id(s3_object, key):
+    etag = s3_object.get("eTag", "")
+
+    etag = etag.strip('"')
+
+    return f"{key}#{etag}"
+
+
+def deploy(record):
 
     s3_info = record["s3"]
 
-    bucket = s3_info[
-        "bucket"
-    ]["name"]
+    bucket = s3_info["bucket"]["name"]
 
     key = urllib.parse.unquote_plus(
         s3_info["object"]["key"]
     )
 
-    dataset, filename = parse_incoming_key(
-        key
-    )
+    if bucket != S3_BUCKET:
+        return {"status": "ignored"}
 
-    if (
-        bucket != S3_BUCKET
-        or not dataset
-    ):
-        return {
-            "status": "ignored",
-            "key": key
-        }
+    dataset, filename = parse_incoming_key(key)
 
-    source_id = source_id_for(
+    if not dataset:
+        return {"status": "ignored"}
+
+    manifest = load_manifest(dataset)
+
+    source_id = get_source_id(
         s3_info["object"],
         key
     )
 
-    manifest = load_manifest(
-        dataset
-    )
+    if manifest.get(
+        "last_source_id"
+    ) == source_id:
 
-    if (
-        manifest.get("last_source_id")
-        == source_id
-    ):
         return {
             "status": "duplicate_skipped",
             "dataset": dataset
         }
 
-    active = resolve_active_slot(
+    active = get_active_slot(
         dataset,
         manifest
     )
@@ -572,66 +338,23 @@ def deploy_record(record):
         Key=key
     )["Body"].read()
 
-    (
-        is_valid,
-        columns,
-        rows,
-        reason
-    ) = validate_parquet(data)
-
-    if (
-        is_valid
-        and ENFORCE_SCHEMA_COMPAT
-        and active
-    ):
-
-        active_metadata = (
-            manifest
-            .get("slots", {})
-            .get(active, {})
-        )
-
-        problems = schema_problems(
-            active_metadata.get(
-                "columns",
-                []
-            ),
-            columns
-        )
-
-        if problems:
-
-            is_valid = False
-
-            reason = (
-                "schema incompatible: "
-                + "; ".join(problems)
-            )
+    is_valid, columns, rows = validate_parquet(
+        data
+    )
 
     if not is_valid:
 
-        manifest.update({
-            "last_status": "rejected",
-            "last_source_id": source_id,
-            "last_reason": reason
-        })
+        manifest["last_status"] = "rejected"
+        manifest["last_source_id"] = source_id
 
         write_manifest(
             dataset,
             manifest
         )
 
-        logger.warning(
-            "Rejected %s: %s",
-            key,
-            reason
-        )
-
         return {
             "status": "rejected",
-            "dataset": dataset,
-            "reason": reason,
-            "active_slot": active
+            "dataset": dataset
         }
 
     delete_prefix(
@@ -652,24 +375,14 @@ def deploy_record(record):
 
     set_glue_table_pointer(
         dataset,
-        slot_location(
-            dataset,
-            target
-        ),
+        slot_location(dataset, target),
         columns
     )
 
-    version = (
-        manifest.get(
-            "version",
-            0
-        ) + 1
-    )
-
-    manifest.setdefault(
-        "slots",
-        {}
-    )
+    version = manifest.get(
+        "version",
+        0
+    ) + 1
 
     manifest["slots"][target] = {
         "version": version,
@@ -684,8 +397,7 @@ def deploy_record(record):
         "previous_slot": active,
         "version": version,
         "last_status": "activated",
-        "last_source_id": source_id,
-        "last_reason": ""
+        "last_source_id": source_id
     })
 
     write_manifest(
@@ -705,77 +417,37 @@ def deploy_record(record):
 
 def rollback(dataset):
 
-    if not dataset:
-
-        return {
-            "status": "error",
-            "message": "dataset_name is required"
-        }
-
-    manifest = load_manifest(
-        dataset
-    )
+    manifest = load_manifest(dataset)
 
     previous = manifest.get(
         "previous_slot"
     )
 
     if previous not in SLOTS:
-
         return {
             "status": "error",
-            "message": "no previous slot to roll back to"
+            "message": "No previous version available"
         }
 
-    active = resolve_active_slot(
+    active = get_active_slot(
         dataset,
         manifest
     )
 
     if previous == active:
-
         return {
             "status": "error",
-            "message": (
-                "manifest and Glue disagree; "
-                "refusing to roll back"
-            )
+            "message": "Invalid rollback state"
         }
 
-    previous_metadata = (
-        manifest
-        .get("slots", {})
-        .get(previous, {})
-    )
+    previous_data = manifest[
+        "slots"
+    ].get(previous)
 
-    previous_columns = previous_metadata.get(
-        "columns",
-        []
-    )
-
-    if not previous_columns:
-
+    if not previous_data:
         return {
             "status": "error",
-            "message": (
-                f"no schema recorded for "
-                f"slot '{previous}'"
-            )
-        }
-
-    if not prefix_has_objects(
-        slot_prefix(
-            dataset,
-            previous
-        )
-    ):
-
-        return {
-            "status": "error",
-            "message": (
-                f"slot '{previous}' is empty; "
-                "cannot roll back"
-            )
+            "message": "Previous deployment not found"
         }
 
     set_glue_table_pointer(
@@ -784,17 +456,13 @@ def rollback(dataset):
             dataset,
             previous
         ),
-        previous_columns
+        previous_data["columns"]
     )
 
     manifest.update({
         "active_slot": previous,
         "previous_slot": active,
-        "last_status": "rolled_back",
-        "last_reason": (
-            f"rolled back from "
-            f"{active} to {previous}"
-        )
+        "last_status": "rolled_back"
     })
 
     write_manifest(
@@ -810,14 +478,9 @@ def rollback(dataset):
     }
 
 
-def lambda_handler(
-    event,
-    context
-):
+def lambda_handler(event, context):
 
-    if event.get(
-        "action"
-    ) == "rollback":
+    if event.get("action") == "rollback":
 
         dataset = sanitize_name(
             event.get(
@@ -838,7 +501,7 @@ def lambda_handler(
         }
 
     results = [
-        deploy_record(record)
+        deploy(record)
         for record in records
     ]
 
