@@ -108,22 +108,6 @@ def validate_parquet(data):
         return False, [], 0
 
 
-def promote_green_to_blue(dataset, filename):
-    """
-    Copy the validated GREEN file to BLUE.
-
-    BLUE always represents the current production dataset.
-    """
-
-    s3.copy_object(
-        Bucket=S3_BUCKET,
-        CopySource={
-            "Bucket": S3_BUCKET,
-            "Key": f"{dataset}/green/{filename}"
-        },
-        Key=f"{dataset}/blue/{filename}"
-    )
-
 
 def set_glue_table_pointer(dataset, location, columns):
     """
